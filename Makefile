@@ -33,9 +33,9 @@ export PATH:=$(if $(STAGING_DIR),$(abspath $(STAGING_DIR)/../host/bin),$(TOPDIR)
 # 当 OPENWRT_BUILD 不等于 1 时，意味着这可能是第一次执行构建，随后会设置一些环境变量、导入必要的配置文件等
 ifneq ($(OPENWRT_BUILD),1)
 
-  _SINGLE=export MAKEFLAGS=$(space);					# 定义变量 _SINGLE，设置 MAKEFLAGS 为包含空格的字符串
+  _SINGLE=export MAKEFLAGS=$(space);
 
-  override OPENWRT_BUILD=1								# 将 OPENWRT_BUILD 变量强制设置为 1
+  override OPENWRT_BUILD=1
   export OPENWRT_BUILD
   GREP_OPTIONS=
   export GREP_OPTIONS
