@@ -20,10 +20,10 @@ released)
 		echo "REBOOT" > /dev/console
 		sync
 		reboot
-	elif [ "$SEEN" -ge 5 -a -n "$OVERLAY" ]
+	elif [ "$SEEN" -ge 2 -a -n "$OVERLAY" ]
 	then
 		echo "FACTORY RESET" > /dev/console
-		jffs2reset -y && reboot &
+		factoryreset -y && reboot &
 	fi
 ;;
 esac

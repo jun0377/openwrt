@@ -1,5 +1,7 @@
 #
 # Copyright (C) 2010-2015 OpenWrt.org
+# Copyright (C) 2018-2019 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
+# - Added gateway setting
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -8,7 +10,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=6in4
-PKG_RELEASE:=29
+PKG_VERSION:=270
+PKG_RELEASE:=2
 PKG_LICENSE:=GPL-2.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -16,7 +19,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/6in4
   SECTION:=net
   CATEGORY:=Network
-  DEPENDS:=@IPV6 +kmod-sit +uclient-fetch +resolveip
+  DEPENDS:=@IPV6 +kmod-sit +uclient-fetch
   TITLE:=IPv6-in-IPv4 configuration support
   MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
   PKGARCH:=all
