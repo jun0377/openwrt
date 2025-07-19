@@ -36,6 +36,11 @@ git-src
 .ccache
 .vscode*
 
+include/download.mk
+scripts/dl_github_archive.py
+target/linux/bcm27xx/image/cmdline.txt
+target/linux/bcm27xx/image/config.txt
+
 
 include/package-pack.mk
 package/base-files/files/bin/config_generate
