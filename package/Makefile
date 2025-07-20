@@ -166,12 +166,19 @@ ifdef CONFIG_JSON_CYCLONEDX_SBOM
 endif
 endif
 
+# 安装标志设置
 $(curdir)/flags-install:= -j1
 
+# 前置依赖检查
 $(eval $(call stampfile,$(curdir),package,prereq,.config))
+# 清理
 $(eval $(call stampfile,$(curdir),package,cleanup,$(TMP_DIR)/.build))
+# 编译
 $(eval $(call stampfile,$(curdir),package,compile,$(TMP_DIR)/.build))
+#安装
 $(eval $(call stampfile,$(curdir),package,install,$(TMP_DIR)/.build))
+# 校验
 $(eval $(call stampfile,$(curdir),package,check,$(TMP_DIR)/.build))
 
+# 将当前目录注册为构建系统的子模块，对子目录中的Makefile递归处理
 $(eval $(call subdir,$(curdir)))

@@ -2,6 +2,11 @@
 #
 # Copyright (C) 2007 OpenWrt.org
 
+
+#
+#
+#
+
 TOPDIR:=${CURDIR}
 
 # C语言环境
@@ -56,20 +61,22 @@ else
 # Include the test suite Makefile if it exists
 -include tests/Makefile
 
-# 定义 toolchain/stamp-compile 目标，依赖于 tools/stamp-compile 和可选的 toolchain_rebuild_check
-$(info CONFIG_BUILDBOT value: $(CONFIG_BUILDBOT))
+# toolchain编译完成 : 依赖于 tools编译完成 和 toolchain检查通过
 $(toolchain/stamp-compile): $(tools/stamp-compile) $(if $(CONFIG_BUILDBOT),toolchain_rebuild_check)
 
-# 定义 target/stamp-compile 目标，依赖于 toolchain/stamp-compile、tools/stamp-compile 和 BUILD_DIR/.prepared
+# target编译完成 : 依赖于 toolchain编译完成 tools编译完成 $(BUILD_DIR)/.prepared目录存在
 $(target/stamp-compile): $(toolchain/stamp-compile) $(tools/stamp-compile) $(BUILD_DIR)/.prepared
 
-# 定义 package/stamp-compile 目标，依赖于 target/stamp-compile 和 package/stamp-cleanup
-$(package/stamp-compile): $(target/stamp-compile) $(package/stamp-cleanup)
+# pacakge编译完成 : 依赖于 target编译完成 和 package清理完成
+# 注意：由于依赖于 $(package/stamp-cleanup), 因此每一次执行此Makefile都会先清理所有的package
+# $(package/stamp-compile): $(target/stamp-compile) $(package/stamp-cleanup)
+# 注意：为了避免重复编译，我们只依赖于 target编译完成，不清理package; 只能手动清理pacakge
+$(package/stamp-compile): $(target/stamp-compile)
 
-# 定义 package/stamp-install 目标，依赖于 package/stamp-compile
+# package安装完成 package/stamp-install 目标，依赖于 package/stamp-compile
 $(package/stamp-install): $(package/stamp-compile)
 
-# 定义 target/stamp-install 目标，依赖于 package/stamp-compile 和 package/stamp-install
+# target安装完成 target/stamp-install 目标，依赖于 package/stamp-compile 和 package/stamp-install
 $(target/stamp-install): $(package/stamp-compile) $(package/stamp-install)
 
 # 定义 check 目标，依赖于工具链和包的检查目标
