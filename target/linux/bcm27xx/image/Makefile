@@ -174,7 +174,9 @@ define Device/rpi-4
   DEVICE_DTS := \
 	broadcom/bcm2711-rpi-400 \
 	broadcom/bcm2711-rpi-4-b \
-	broadcom/bcm2711-rpi-cm4
+	broadcom/bcm2711-rpi-cm4 \
+	broadcom/bcm2711-rpi-cm4s \
+	broadcom/bcm2711-rpi-cm4-io
   SUPPORTED_DEVICES := \
 	raspberrypi,400 \
 	raspberrypi,4-compute-module \
@@ -193,10 +195,19 @@ ifeq ($(SUBTARGET),bcm2711)
 endif
 
 define Device/rpi-5
-  DEVICE_MODEL := 5
+  DEVICE_MODEL := 5/CM5
   KERNEL_IMG := kernel_2712.img
-  DEVICE_DTS := broadcom/bcm2712-rpi-5-b
-  SUPPORTED_DEVICES := raspberrypi,5-model-b
+  DEVICE_DTS := \
+	broadcom/bcm2712-rpi-500 \
+	broadcom/bcm2712-rpi-5-b \
+	broadcom/bcm2712-rpi-cm5-cm4io \
+	broadcom/bcm2712-rpi-cm5-cm5io \
+	broadcom/bcm2712-rpi-cm5l-cm4io \
+	broadcom/bcm2712-rpi-cm5l-cm5io
+  SUPPORTED_DEVICES := \
+	raspberrypi,500 \
+	raspberrypi,5-compute-module \
+	raspberrypi,5-model-b
   DEVICE_PACKAGES := \
 	cypress-firmware-43455-sdio \
 	brcmfmac-nvram-43455-sdio \
