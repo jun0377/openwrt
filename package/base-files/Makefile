@@ -7,6 +7,7 @@
 #
 
 include $(TOPDIR)/rules.mk
+# 内核编译的Makefile
 include $(INCLUDE_DIR)/kernel.mk
 include $(INCLUDE_DIR)/version.mk
 include $(INCLUDE_DIR)/feeds.mk

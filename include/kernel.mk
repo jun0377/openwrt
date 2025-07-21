@@ -2,23 +2,28 @@
 #
 # Copyright (C) 2006-2020 OpenWrt.org
 
+# 检查是否为check目标，只检查不编译
 ifneq ($(filter check,$(MAKECMDGOALS)),)
 CHECK:=1
+# 用于信息输出和调试
 DUMP:=1
 endif
 
+# 编译时间戳
 ifneq ($(SOURCE_DATE_EPOCH),)
   ifndef DUMP
     KBUILD_BUILD_TIMESTAMP:=$(shell perl -e 'print scalar gmtime($(SOURCE_DATE_EPOCH))')
   endif
 endif
 
+# 获取目标平台编译配置
 ifeq ($(__target_inc),)
   ifndef CHECK
     include $(INCLUDE_DIR)/target.mk
   endif
 endif
 
+# 调试模式，变量默认值
 ifeq ($(DUMP),1)
   KERNEL?=<KERNEL>
   BOARD?=<BOARD>
@@ -31,6 +36,8 @@ else
 
   LINUX_KMOD_SUFFIX=ko
 
+  # 交叉编译工具链, 查看BOADR变量是否包含"uml"字符串
+  # UML 是 "User Mode Linux" 的缩写，是一种在用户空间运行的Linux内核,不需要交叉编译
   ifneq (,$(findstring uml,$(BOARD)))
     KERNEL_CC?=$(HOSTCC)
     KERNEL_CROSS?=
@@ -39,29 +46,39 @@ else
     KERNEL_CROSS?=$(TARGET_CROSS)
   endif
 
+  # 补丁目录
   ifeq ($(TARGET_BUILD),1)
     PATCH_DIR ?= $(CURDIR)/patches$(if $(wildcard ./patches-$(KERNEL_PATCHVER)),-$(KERNEL_PATCHVER))
     FILES_DIR ?= $(foreach dir,$(wildcard $(CURDIR)/files $(CURDIR)/files-$(KERNEL_PATCHVER)),"$(dir)")
   endif
+
+  # 内核编译目录
   KERNEL_BUILD_DIR ?= $(BUILD_DIR)/linux-$(BOARD)_$(SUBTARGET)
+  # 内核源码目录
   LINUX_DIR ?= $(KERNEL_BUILD_DIR)/linux-$(LINUX_VERSION)
+  # 内核user api头文件目录
   LINUX_UAPI_DIR=uapi/
+  # 内核版本魔数
   LINUX_VERMAGIC:=$(strip $(shell cat $(LINUX_DIR)/.vermagic 2>/dev/null))
   LINUX_VERMAGIC:=$(if $(LINUX_VERMAGIC),$(LINUX_VERMAGIC),unknown)
 
+  # 内核版本号
   LINUX_UNAME_VERSION:=$(KERNEL_BASE)
   ifneq ($(findstring -rc,$(LINUX_VERSION)),)
     LINUX_UNAME_VERSION:=$(LINUX_UNAME_VERSION)-$(strip $(lastword $(subst -, ,$(LINUX_VERSION))))
   endif
 
+  # 内核镜像vmlinux路径
   LINUX_KERNEL:=$(KERNEL_BUILD_DIR)/vmlinux
-
+  
+  # 尚未解压的内核源码目录
   ifneq (,$(findstring -rc,$(LINUX_VERSION)))
       LINUX_SOURCE:=linux-$(LINUX_VERSION).tar.gz
   else
       LINUX_SOURCE:=linux-$(LINUX_VERSION).tar.xz
   endif
 
+  # 内核下载地址
   ifneq (,$(findstring -rc,$(LINUX_VERSION)))
       LINUX_SITE:=https://git.kernel.org/torvalds/t
   else ifeq ($(call qstrip,$(CONFIG_EXTERNAL_KERNEL_TREE))$(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
@@ -70,14 +87,18 @@ else
       LINUX_UNAME_VERSION:=$(strip $(shell cat $(LINUX_DIR)/include/config/kernel.release 2>/dev/null))
   endif
 
+  # 内核模块目录
   MODULES_SUBDIR:=lib/modules/$(LINUX_UNAME_VERSION)
+  # 内核模块编译后的保存路径
   TARGET_MODULES_DIR:=$(LINUX_TARGET_DIR)/$(MODULES_SUBDIR)
 
+  # package编译目录
   ifneq ($(TARGET_BUILD),1)
     PKG_BUILD_DIR ?= $(KERNEL_BUILD_DIR)/$(if $(BUILD_VARIANT),$(PKG_NAME)-$(BUILD_VARIANT)/)$(PKG_NAME)$(if $(PKG_VERSION),-$(PKG_VERSION))
   endif
 endif
 
+# 内核架构
 ifneq (,$(findstring uml,$(BOARD)))
   LINUX_KARCH=um
 else ifneq (,$(findstring $(ARCH) , aarch64 aarch64_be ))
@@ -102,8 +123,23 @@ else
   LINUX_KARCH := $(ARCH)
 endif
 
+# 内核编译命令: make + 编译选项
 KERNEL_MAKE = $(MAKE) $(KERNEL_MAKEOPTS)
 
+# 内核编译选项
+## KCFLAGS ：内核编译标志，包含路径重映射、优化选项和自定义内核编译标志
+## HOSTCFLAGS ：主机编译器标志，添加了警告选项
+## CROSS_COMPILE ：交叉编译工具链前缀
+## ARCH ：目标架构（如 arm64、x86 等）
+## KBUILD_HAVE_NLS ：禁用国际化支持
+## KBUILD_BUILD_USER/HOST ：构建用户和主机信息
+## KBUILD_BUILD_TIMESTAMP/VERSION ：构建时间戳和版本
+## KBUILD_HOSTLDFLAGS ：主机链接器标志
+## CONFIG_SHELL ：指定使用的shell（bash）
+## V=1/V='' ：根据详细输出设置控制编译输出详细程度
+## LDFLAGS_MODULE ：模块链接标志（包含构建ID）
+## cmd_syscalls ：系统调用相关（置空）
+## KBUILD_EXTRA_SYMBOLS ：额外的符号表文件
 KERNEL_MAKE_FLAGS = \
 	KCFLAGS="$(call iremap,$(BUILD_DIR),$(notdir $(BUILD_DIR))) $(filter-out -fno-plt,$(call qstrip,$(CONFIG_EXTRA_OPTIMIZATION))) $(call qstrip,$(CONFIG_KERNEL_CFLAGS))" \
 	HOSTCFLAGS="$(HOST_CFLAGS) -Wall -Wmissing-prototypes -Wstrict-prototypes" \
@@ -121,25 +157,36 @@ KERNEL_MAKE_FLAGS = \
 	cmd_syscalls= \
 	$(if $(__package_mk),KBUILD_EXTRA_SYMBOLS="$(wildcard $(PKG_SYMVERS_DIR)/*.symvers)")
 
+# 交叉编译工具链
 ifneq (,$(KERNEL_CC))
   KERNEL_MAKE_FLAGS += CC="$(KERNEL_CC)"
 endif
 
+# 内核编译时的头文件包含标志
+## -nostdinc ：告诉编译器不要使用标准的系统头文件目录，这是交叉编译的关键设置
+## -isystem $(shell $(TARGET_CC) -print-file-name=include) ：使用目标架构编译器（TARGET_CC）查找其内置的 include 目录
+## 如果是 DUMP 模式（配置检查模式），则不添加额外的头文件路径
 KERNEL_NOSTDINC_FLAGS = \
 	-nostdinc $(if $(DUMP),, -isystem $(shell $(TARGET_CC) -print-file-name=include))
 
+# 根据内核源码来源的配置，有条件地设置内核版本标识
+## 标准内核构建 ：当使用 OpenWrt 默认的内核源码时，明确设置内核版本号
+## 外部内核兼容 ：当使用外部内核树或从Git仓库克隆内核时，不强制设置版本号，让外部内核自己管理版本信息
 ifeq ($(call qstrip,$(CONFIG_EXTERNAL_KERNEL_TREE))$(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
   KERNEL_MAKE_FLAGS += \
 	KERNELRELEASE=$(LINUX_VERSION)
 endif
 
+# 编译主机是linux
 ifneq ($(HOST_OS),Linux)
   KERNEL_MAKE_FLAGS += CONFIG_STACK_VALIDATION=
   export SKIP_STACK_VALIDATION:=1
 endif
 
+# 内核编译选项
 KERNEL_MAKEOPTS = -C $(LINUX_DIR) $(KERNEL_MAKE_FLAGS)
 
+# Sparse静态代码分析工具
 ifdef CONFIG_USE_SPARSE
   KERNEL_MAKEOPTS += C=1 CHECK=$(STAGING_DIR_HOST)/bin/sparse
 endif
@@ -148,6 +195,7 @@ PKG_EXTMOD_SUBDIRS ?= .
 
 PKG_SYMVERS_DIR = $(KERNEL_BUILD_DIR)/symvers
 
+# 收集内核模块符号表
 define collect_module_symvers
 	for subdir in $(PKG_EXTMOD_SUBDIRS); do \
 		realdir=$$$$(readlink -f $(PKG_BUILD_DIR)); \
@@ -160,6 +208,7 @@ define collect_module_symvers
 	mv $(PKG_BUILD_DIR)/Module.symvers $(PKG_SYMVERS_DIR)/$(PKG_NAME).symvers
 endef
 
+# 内核模块编译后的钩子函数，这里将其设置为内核模块编译完成后，自动收集符号模块表
 define KernelPackage/hooks
   ifneq ($(PKG_NAME),kernel)
     Hooks/Compile/Post += collect_module_symvers
@@ -168,6 +217,7 @@ define KernelPackage/hooks
   endef
 endef
 
+# 为内核模块包定义默认配置参数
 define KernelPackage/Defaults
   FILES:=
   AUTOLOAD:=
