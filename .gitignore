@@ -53,11 +53,7 @@ target/linux/x86/config-6.6
 target/linux/x86/generic/config-6.6
 target/linux/x86/geode/config-6.6
 target/linux/x86/legacy/config-6.6
-tools/Makefile
-tools/dwarves/Makefile
 
-
-include/package-pack.mk
 package/base-files/files/bin/config_generate
 package/base-files/files/etc/banner
 package/base-files/files/etc/board.d/99-default_network
