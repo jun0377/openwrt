@@ -5,24 +5,33 @@
 # See /LICENSE for more information.
 #
 # Main makefile for the toolchain
+# 文件说明：这是工具链的主要Makefile文件
 #
 # Steps:
 # 1) toolchain/binutils/compile
 #    build & install binutils
+#    编译并安装二进制工具集(binutils)
 # 2) toolchain/gcc/minimal/compile
 #    build & install a minimal gcc, needed for steps 3 & 4
+#    编译并安装最小版本的gcc，用于步骤3和4
 # 3) toolchain/kernel-headers/compile
 #    install kernel headers, needed for step 4
+#    安装内核头文件，用于步骤4
 # 4) toolchain/libc/headers/compile
 #    build & install libc headers & support files, needed for step 5
+#    编译并安装libc头文件和支持文件，用于步骤5
 # 5) toolchain/gcc/initial/compile
 #    build & install an initial gcc, needed for step 6
+#    编译并安装初始版本的gcc，用于步骤6
 # 6) toolchain/libc/compile
 #    build & install the final libc
+#    编译并安装最终版本的libc
 # 7) toolchain/gcc/final/compile
 #    build & install the final gcc
+#    编译并安装最终版本的gcc
 #
 # For musl, steps 2 and 4 are skipped, and step 3 is done after 5
+# 对于musl libc，步骤2和4被跳过，步骤3在步骤5之后执行
 
 curdir:=toolchain
 
