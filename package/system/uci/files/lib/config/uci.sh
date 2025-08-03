@@ -18,13 +18,17 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 CONFIG_APPEND=
+
+# 从UCI配置文件中读取配置并将其转换为shell环境变量
 uci_load() {
+	# 要加载的UCI配置包名称
 	local PACKAGE="$1"
 	local DATA
 	local RET
 	local VAR
 
 	_C=0
+	# 非追加模式,清理现有配置
 	if [ -z "$CONFIG_APPEND" ]; then
 		for VAR in $CONFIG_LIST_STATE; do
 			export ${NO_EXPORT:+-n} CONFIG_${VAR}=
@@ -36,11 +40,15 @@ uci_load() {
 		export ${NO_EXPORT:+-n} CONFIG_SECTION=
 	fi
 
+	# 从UCI读取配置数据
 	DATA="$(/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} ${LOAD_STATE:+-P /var/state} -S -n export "$PACKAGE" 2>/dev/null)"
 	RET="$?"
+
+	# 执行配置数据
 	[ "$RET" != 0 -o -z "$DATA" ] || eval "$DATA"
 	unset DATA
 
+	# 如果设置了 CONFIG_SECTION ，则调用 config_cb 回调
 	${CONFIG_SECTION:+config_cb}
 	return "$RET"
 }

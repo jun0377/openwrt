@@ -1,3 +1,5 @@
+
+# preinit脚本，用于在系统启动的初期阶段收集设备信息
 do_sysinfo_generic() {
 	[ -d /proc/device-tree ] || return
 	mkdir -p /tmp/sysinfo

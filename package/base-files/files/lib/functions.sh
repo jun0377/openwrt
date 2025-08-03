@@ -2,7 +2,7 @@
 # Copyright (C) 2006 Fokus Fraunhofer <carsten.tittel@fokus.fraunhofer.de>
 # Copyright (C) 2010 Vertical Communications
 
-
+# 调试输出函数
 debug () {
 	${DEBUG:-:} "$@"
 }
@@ -17,6 +17,7 @@ LOAD_STATE=1
 LIST_SEP=" "
 
 # xor multiple hex values of the same length
+# 对多个相同长度的十六进制数进行异或运算
 xor() {
 	local val
 	local ret="0x$1"
@@ -32,6 +33,7 @@ xor() {
 	printf "%0${retlen}x" "$ret"
 }
 
+# 将十六进制数转为二进制
 data_2bin() {
 	local data=$1
 	local len=${#1}
@@ -44,6 +46,7 @@ data_2bin() {
 	echo -ne $bin_data
 }
 
+# 将十六进制数异或
 data_2xor_val() {
 	local data=$1
 	local len=${#1}
@@ -56,6 +59,7 @@ data_2xor_val() {
 	echo -n ${xor_data:0:-1}
 }
 
+# 向变量末尾追加值
 append() {
 	local var="$1"
 	local value="$2"
@@ -64,6 +68,7 @@ append() {
 	eval "export ${NO_EXPORT:+-n} -- \"$var=\${$var:+\${$var}\${value:+\$sep}}\$value\""
 }
 
+# 向变量开头添加值
 prepend() {
 	local var="$1"
 	local value="$2"
@@ -72,6 +77,7 @@ prepend() {
 	eval "export ${NO_EXPORT:+-n} -- \"$var=\$value\${$var:+\${sep}\${$var}}\""
 }
 
+# 检查列表中是否包含指定字符串
 list_contains() {
 	local var="$1"
 	local str="$2"
@@ -81,11 +87,13 @@ list_contains() {
 	[ "${val%% $str *}" != "$val" ]
 }
 
+# 加载uci配置文件
 config_load() {
 	[ -n "$IPKG_INSTROOT" ] && return 0
 	uci_load "$@"
 }
 
+# 
 reset_cb() {
 	config_cb() { return 0; }
 	option_cb() { return 0; }
@@ -137,6 +145,12 @@ config_unset() {
 
 # config_get <variable> <section> <option> [<default>]
 # config_get <section> <option>
+
+# 从UCI配置中获取值
+## $1 ：目标变量名（当有3个参数时）或配置节名（当有2个参数时）
+## $2 ：配置节名（当有3个参数时）或选项名（当有2个参数时）
+## $3 ：选项名（可选，当提供时表示使用3参数模式）
+## $4 ：默认值（可选）
 config_get() {
 	case "$2${3:-$1}" in
 		*[!A-Za-z0-9_]*) : ;;
@@ -161,6 +175,8 @@ get_bool() {
 }
 
 # config_get_bool <variable> <section> <option> [<default>]
+
+# 从UCI配置中获取bool类型的值
 config_get_bool() {
 	local _tmp
 	config_get _tmp "$2" "$3" "$4"
@@ -168,6 +184,7 @@ config_get_bool() {
 	export ${NO_EXPORT:+-n} "$1=$_tmp"
 }
 
+# 设置UCI配置值
 config_set() {
 	local section="$1"
 	local option="$2"
@@ -176,6 +193,10 @@ config_set() {
 	export ${NO_EXPORT:+-n} "CONFIG_${section}_${option}=${value}"
 }
 
+# 遍历配置段并执行指定函数
+##	$1 ：要执行的函数名
+##	$2 ：可选的配置节类型过滤器
+##	$@ ：传递给执行函数的额外参数
 config_foreach() {
 	local ___function="$1"
 	[ "$#" -ge 1 ] && shift
@@ -191,6 +212,7 @@ config_foreach() {
 	done
 }
 
+# 遍历UCI配置list项，处理UCI中的list类型配置
 config_list_foreach() {
 	[ "$#" -ge 3 ] || return 0
 	local section="$1"; shift
@@ -209,6 +231,7 @@ config_list_foreach() {
 	done
 }
 
+# 软件包卸载前的处理函数：停止相关服务，禁用启动脚本
 default_prerm() {
 	local root="${IPKG_INSTROOT}"
 	[ -z "$pkgname" ] && local pkgname="$(basename ${1%.*})"
@@ -236,6 +259,7 @@ default_prerm() {
 	return $ret
 }
 
+# 根据软件包要求添加用户和组
 add_group_and_user() {
 	[ -z "$pkgname" ] && local pkgname="$(basename ${1%.*})"
 	local rusers="$(sed -ne 's/^Require-User: *//p' $root/usr/lib/opkg/info/${pkgname}.control 2>/dev/null)"
@@ -291,6 +315,7 @@ add_group_and_user() {
 	fi
 }
 
+# 更新系统替代方案
 update_alternatives() {
 	local root="${IPKG_INSTROOT}"
 	local action="$1"
@@ -340,6 +365,7 @@ update_alternatives() {
 	fi
 }
 
+# 软件包安装后的默认处理：启动相关服务，处理UCI默认配置
 default_postinst() {
 	local root="${IPKG_INSTROOT}"
 	[ -z "$pkgname" ] && local pkgname="$(basename ${1%.*})"
@@ -449,6 +475,7 @@ find_mmc_part() {
 	done
 }
 
+# 创建组
 group_add() {
 	local name="$1"
 	local gid="$2"
@@ -459,10 +486,12 @@ group_add() {
 	[ -n "$IPKG_INSTROOT" ] || lock -u /var/lock/group
 }
 
+# 检查组存在性
 group_exists() {
 	grep -qs "^${1}:" ${IPKG_INSTROOT}/etc/group
 }
 
+# 自动分配组ID
 group_add_next() {
 	local gid gids
 	gid=$(grep -s "^${1}:" ${IPKG_INSTROOT}/etc/group | cut -d: -f3)
@@ -479,6 +508,7 @@ group_add_next() {
 	echo $gid
 }
 
+# 将用户添加到指定组
 group_add_user() {
 	local grp delim=","
 	grp=$(grep -s "^${1}:" ${IPKG_INSTROOT}/etc/group)
@@ -492,6 +522,7 @@ group_add_user() {
 	[ -n "$IPKG_INSTROOT" ] || lock -u /var/lock/passwd
 }
 
+# 添加用户
 user_add() {
 	local name="${1}"
 	local uid="${2}"
@@ -515,10 +546,12 @@ user_add() {
 	[ -n "$IPKG_INSTROOT" ] || lock -u /var/lock/passwd
 }
 
+# 检查用户是否存在
 user_exists() {
 	grep -qs "^${1}:" ${IPKG_INSTROOT}/etc/passwd
 }
 
+# 系统硬件信息
 board_name() {
 	[ -e /tmp/sysinfo/board_name ] && cat /tmp/sysinfo/board_name || echo "generic"
 }
