@@ -180,8 +180,12 @@ buildinfo: FORCE
 prepare: .config $(tools/stamp-compile) $(toolchain/stamp-compile)
 	$(_SINGLE)$(SUBMAKE) -r buildinfo
 
+# 在根文件系统中生成一个版本号文件
+version: FORCE
+	$(shell TZ='Asia/Shanghai' date +%Y%m%d-%H%M%S > $(TOPDIR)/files/etc/version)
+
 # 定义 world 目标，依赖于 prepare 和其他编译目标，执行索引生成、JSON 信息生成和 checksum 计算
-world: prepare $(target/stamp-compile) $(package/stamp-compile) $(package/stamp-install) $(target/stamp-install) FORCE
+world: version prepare $(target/stamp-compile) $(package/stamp-compile) $(package/stamp-install) $(target/stamp-install) FORCE
 	$(_SINGLE)$(SUBMAKE) -r package/index
 	$(_SINGLE)$(SUBMAKE) -r json_overview_image_info
 	$(_SINGLE)$(SUBMAKE) -r checksum
