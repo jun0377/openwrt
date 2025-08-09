@@ -1,33 +1,58 @@
 #!/bin/sh
 
+# NCM协议处理脚本，用于OpenWrt系统中管理NCM调制解调器连接
+
 [ -n "$INCLUDE_ONLY" ] || {
+	# 加载OpenWrt通用函数库
 	. /lib/functions.sh
+	# 加载网络接口守护进程协议处理函数
 	. ../netifd-proto.sh
+	# 初始化协议处理器
 	init_proto "$@"
 }
 
+# NCM协议配置初始化函数
 proto_ncm_init_config() {
+	# 标记此协议不需要物理设备
 	no_device=1
+	# 标记协议可用
 	available=1
+	# 添加设备路径配置项
 	proto_config_add_string "device:device"
+	# 添加接口名称配置项
 	proto_config_add_string ifname
+	# 添加接入点名称配置项
 	proto_config_add_string apn
+	# 添加认证方式配置项
 	proto_config_add_string auth
+	# 添加用户名配置项
 	proto_config_add_string username
+	# 添加密码配置项
 	proto_config_add_string password
+	# 添加PIN码配置项
 	proto_config_add_string pincode
+	# 添加延迟时间配置项
 	proto_config_add_string delay
+	# 添加工作模式配置项
 	proto_config_add_string mode
+	# 添加PDP类型配置项（IP/IPV6/IPV4V6）
 	proto_config_add_string pdptype
+	# 添加源过滤配置项
 	proto_config_add_boolean sourcefilter
+	# 添加委托配置项
 	proto_config_add_boolean delegate
+	# 添加配置文件编号配置项
 	proto_config_add_int profile
+	# 添加默认配置项
 	proto_config_add_defaults
 }
 
+# NCM协议连接建立函数
 proto_ncm_setup() {
+	# 获取接口名称参数
 	local interface="$1"
 
+	# 声明本地变量用于存储调制解调器相关信息
 	local manufacturer initialize setmode connect finalize devname devpath ifpath
 
 	local device ifname  apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
@@ -39,48 +64,69 @@ proto_ncm_setup() {
 
 	[ -n "$profile" ] || profile=1
 
+	# 将PDP类型转换为大写
 	pdptype=$(echo "$pdptype" | awk '{print toupper($0)}')
+	# 验证PDP类型，如果不是有效值则默认为IP
 	[ "$pdptype" = "IP" -o "$pdptype" = "IPV6" -o "$pdptype" = "IPV4V6" ] || pdptype="IP"
 
+	# 根据PDP类型设置上下文类型
+	# 双栈模式
 	[ "$pdptype" = "IPV4V6" ] && context_type=3
+	# IPv6模式
 	[ -z "$context_type" -a "$pdptype" = "IPV6" ] && context_type=2
+	# IPv4模式（默认）
 	[ -n "$context_type" ] || context_type=1
 
+	# 如果设置了控制设备则使用它
 	[ -n "$ctl_device" ] && device=$ctl_device
 
+	# 检查设备是否已指定
 	[ -n "$device" ] || {
+		# 输出错误信息
 		echo "No control device specified"
+		# 通知协议错误
 		proto_notify_error "$interface" NO_DEVICE
+		# 设置接口不可用
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	# 获取设备的真实路径
 	device="$(readlink -f $device)"
+	# 检查设备是否存在
 	[ -e "$device" ] || {
 		echo "Control device not valid"
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	# 如果接口名称未指定，则自动检测
 	[ -z "$ifname" ] && {
+		# 获取设备基本名称
 		devname="$(basename "$device")"
+		# 根据设备名称类型确定网络接口路径
 		case "$devname" in
+		# ACM类型设备
 		'ttyACM'*)
 			devpath="$(readlink -f /sys/class/tty/$devname/device)"
 			ifpath="$devpath/../*/net"
 			;;
+		# TTY类型设备
 		'tty'*)
 			devpath="$(readlink -f /sys/class/tty/$devname/device)"
 			ifpath="$devpath/../../*/net"
 			;;
+		# 其他USB设备
 		*)
 			devpath="$(readlink -f /sys/class/usbmisc/$devname/device/)"
 			ifpath="$devpath/net"
 			;;
 		esac
+		# 获取网络接口名称
 		ifname="$(ls $(ls -1 -d $ifpath | head -n 1))"
 	}
 
+	# 检查是否成功获取接口名称
 	[ -n "$ifname" ] || {
 		echo "The interface could not be found."
 		proto_notify_error "$interface" NO_IFACE
@@ -88,32 +134,43 @@ proto_ncm_setup() {
 		return 1
 	}
 
+	# 开始获取调制解调器制造商信息的循环
+	# 记录开始时间
 	start=$(date +%s)
 	while true; do
+		# 使用gcom命令获取调制解调器制造商信息
 		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
+		# 如果返回错误则清空制造商信息
 		[ "$manufacturer" = "error" ] && {
 			manufacturer=""
 		}
+		# 如果成功获取制造商信息则退出循环
 		[ -n "$manufacturer" ] && {
 			break
 		}
+		# 如果未设置延迟则立即退出循环
 		[ -z "$delay" ] && {
 			break
 		}
 		sleep 1
 		elapsed=$(($(date +%s) - start))
+		# 如果超过延迟时间则退出循环
 		[ "$elapsed" -gt "$delay" ] && {
 			break
 		}
 	done
+	# 如果未能获取制造商信息则报错退出
 	[ -z "$manufacturer" ] && {
 		echo "Failed to get modem information"
 		proto_notify_error "$interface" GETINFO_FAILED
 		return 1
 	}
 
+	# 加载NCM配置JSON文件
 	json_load "$(cat /etc/gcom/ncm.json)"
+	# 选择对应制造商的配置
 	json_select "$manufacturer"
+	# 如果找不到对应制造商配置则报错
 	[ $? -ne 0 ] && {
 		echo "Unsupported modem"
 		proto_notify_error "$interface" UNSUPPORTED_MODEM
@@ -121,7 +178,9 @@ proto_ncm_setup() {
 		return 1
 	}
 
+	# 获取初始化命令列表并执行
 	json_get_values initialize initialize
+	# 遍历初始化命令
 	for i in $initialize; do
 		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to initialize modem"
@@ -130,6 +189,7 @@ proto_ncm_setup() {
 		}
 	done
 
+	# 如果设置了PIN码则进行验证
 	[ -n "$pincode" ] && {
 		PINCODE="$pincode" gcom -d "$device" -s /etc/gcom/setpin.gcom || {
 			echo "Unable to verify PIN"
@@ -139,8 +199,10 @@ proto_ncm_setup() {
 		}
 	}
 
+	# 获取配置命令列表并执行
 	json_get_values configure configure
 	echo "Configuring modem"
+	# 遍历并执行配置命令
 	for i in $configure; do
 		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to configure modem"
@@ -149,11 +211,13 @@ proto_ncm_setup() {
 		}
 	done
 
+	# 如果设置了工作模式则进行配置
 	[ -n "$mode" ] && {
 		json_select modes
 		json_get_var setmode "$mode"
 		[ -n "$setmode" ] && {
 			echo "Setting mode"
+			# 执行模式设置命令
 			eval COMMAND="$setmode" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 				echo "Failed to set operating mode"
 				proto_notify_error "$interface" SETMODE_FAILED
@@ -163,10 +227,13 @@ proto_ncm_setup() {
 		json_select ..
 	}
 
+	# 开始网络连接
 	echo "Starting network $interface"
+	# 获取连接命令
 	json_get_vars connect
 	[ -n "$connect" ] && {
 		echo "Connecting modem"
+		# 执行连接命令
 		eval COMMAND="$connect" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to connect"
 			proto_notify_error "$interface" CONNECT_FAILED
@@ -174,46 +241,76 @@ proto_ncm_setup() {
 		}
 	}
 
+	# 获取最终化命令
 	json_get_vars finalize
 
+	# 设置网络接口
 	echo "Setting up $ifname"
+	# 初始化接口更新（启用）
 	proto_init_update "$ifname" 1
+	# 开始添加协议数据
 	proto_add_data
+	# 添加制造商信息
 	json_add_string "manufacturer" "$manufacturer"
+	# 结束数据添加
 	proto_close_data
+	# 发送接口更新
 	proto_send_update "$interface"
 
+	# 获取防火墙区域信息
 	local zone="$(fw3 -q network "$interface" 2>/dev/null)"
 
+	# 如果PDP类型支持IPv4则创建IPv4接口
 	[ "$pdptype" = "IP" -o "$pdptype" = "IPV4V6" ] && {
+		# 初始化JSON
 		json_init
+		# 添加IPv4接口名称
 		json_add_string name "${interface}_4"
+		# 添加接口引用
 		json_add_string ifname "@$interface"
+		# 设置协议为DHCP
 		json_add_string proto "dhcp"
+		# 添加动态默认配置
 		proto_add_dynamic_defaults
+		# 如果有防火墙区域，则添加防火墙区域配置
 		[ -n "$zone" ] && {
 			json_add_string zone "$zone"
 		}
+		# 关闭JSON对象
 		json_close_object
+		# 通过ubus添加动态网络接口
 		ubus call network add_dynamic "$(json_dump)"
 	}
 
+	# 如果PDP类型支持IPv6则创建IPv6接口
 	[ "$pdptype" = "IPV6" -o "$pdptype" = "IPV4V6" ] && {
+		# 初始化JSON
 		json_init
+		# 添加IPv6接口名称
 		json_add_string name "${interface}_6"
+		# 添加接口引用
 		json_add_string ifname "@$interface"
+		# 设置协议为DHCPv6
 		json_add_string proto "dhcpv6"
+		# 启用前缀扩展
 		json_add_string extendprefix 1
+		# 如果禁用委托则设置
 		[ "$delegate" = "0" ] && json_add_boolean delegate "0"
+		# 如果禁用源过滤则设置
 		[ "$sourcefilter" = "0" ] && json_add_boolean sourcefilter "0"
+		# 添加动态默认配置
 		proto_add_dynamic_defaults
+		# 如果有防火墙区域
 		[ -n "$zone" ] && {
 			json_add_string zone "$zone"
 		}
+		# 关闭JSON对象
 		json_close_object
+		# 通过ubus添加动态网络接口
 		ubus call network add_dynamic "$(json_dump)"
 	}
 
+	# 如果有最终化命令则执行
 	[ -n "$finalize" ] && {
 		eval COMMAND="$finalize" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to configure modem"
@@ -223,48 +320,65 @@ proto_ncm_setup() {
 	}
 }
 
+# NCM协议连接断开函数
 proto_ncm_teardown() {
 	local interface="$1"
 
+	# 声明制造商和断开命令变量
 	local manufacturer disconnect
 
+	# 声明设备和配置文件变量
 	local device profile
+	# 获取设备和配置文件变量
 	json_get_vars device profile
 
+	# 如果设置了控制设备则使用它
 	[ -n "$ctl_device" ] && device=$ctl_device
 
+	# 检查设备是否已指定
 	[ -n "$device" ] || {
 		echo "No control device specified"
 		proto_notify_error "$interface" NO_DEVICE
+		# 设置接口不可用
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	# 获取设备的真实路径
 	device="$(readlink -f $device)"
+	# 检查设备是否存在
 	[ -e "$device" ] || {
 		echo "Control device not valid"
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	# 如果profile未设置则默认为1
 	[ -n "$profile" ] || profile=1
 
 	echo "Stopping network $interface"
 
+	# 尝试从接口状态中获取制造商信息
 	json_load "$(ubus call network.interface.$interface status)"
+	# 选择数据节点
 	json_select data
+	# 获取制造商信息
 	json_get_vars manufacturer
+	# 获取失败或为空
 	[ $? -ne 0 -o -z "$manufacturer" ] && {
 		# Fallback to direct detect, for proper handle device replug.
+		# 回退到直接检测，用于正确处理设备重新插拔
 		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
 		[ $? -ne 0 -o -z "$manufacturer" ] && {
 			echo "Failed to get modem information"
 			proto_notify_error "$interface" GETINFO_FAILED
 			return 1
 		}
+		# 添加制造商信息到JSON
 		json_add_string "manufacturer" "$manufacturer"
 	}
 
+	# 加载NCM配置JSON文件并选择制造商配置
 	json_load "$(cat /etc/gcom/ncm.json)"
 	json_select "$manufacturer" || {
 		echo "Unsupported modem"
@@ -272,8 +386,10 @@ proto_ncm_teardown() {
 		return 1
 	}
 
+	# 获取断开连接命令并执行
 	json_get_vars disconnect
 	[ -n "$disconnect" ] && {
+		# 执行断开命令
 		eval COMMAND="$disconnect" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to disconnect"
 			proto_notify_error "$interface" DISCONNECT_FAILED
@@ -281,9 +397,14 @@ proto_ncm_teardown() {
 		}
 	}
 
+	# 更新接口状态为关闭
+	# 初始化接口更新（禁用所有）
 	proto_init_update "*" 0
+	# 发送接口更新
 	proto_send_update "$interface"
 }
+# 如果不是仅包含模式则注册NCM协议
 [ -n "$INCLUDE_ONLY" ] || {
+	# 向系统注册NCM协议处理器
 	add_protocol ncm
 }
