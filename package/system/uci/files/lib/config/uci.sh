@@ -53,6 +53,7 @@ uci_load() {
 	return "$RET"
 }
 
+# 如果指定的配置包不存在，则导入默认配置并提交。这通常用于确保系统中存在必要的配置文
 uci_set_default() {
 	local PACKAGE="$1"
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} -q show "$PACKAGE" > /dev/null && return 0
@@ -60,6 +61,7 @@ uci_set_default() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} commit "$PACKAGE"
 }
 
+# 恢复状态配置到上一次提交的状态。这个函数操作的是 /var/state 目录下的状态文件，而不是主配置文
 uci_revert_state() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -68,6 +70,7 @@ uci_revert_state() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} -P /var/state revert "$PACKAGE${CONFIG:+.$CONFIG}${OPTION:+.$OPTION}"
 }
 
+# 设置状态配置的值。状态配置存储在 /var/state 目录下，用于记录运行时状态，不会持久化到主配置文件中
 uci_set_state() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -78,11 +81,13 @@ uci_set_state() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} -P /var/state set "$PACKAGE.$CONFIG${OPTION:+.$OPTION}=$VALUE"
 }
 
+# 先恢复状态配置，然后再设置新值。这是一个组合操作，确保状态配置被正确更新
 uci_toggle_state() {
 	uci_revert_state "$1" "$2" "$3"
 	uci_set_state "$1" "$2" "$3" "$4"
 }
 
+# 设置配置选项的值。这是修改配置的基本函数，会修改主配置文件
 uci_set() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -92,6 +97,7 @@ uci_set() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} set "$PACKAGE.$CONFIG.$OPTION=$VALUE"
 }
 
+# 向列表类型的配置选项添加一个值。UCI 支持列表类型的配置，这个函数用于向列表中添加元素
 uci_add_list() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -101,10 +107,12 @@ uci_add_list() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} add_list "$PACKAGE.$CONFIG.$OPTION=$VALUE"
 }
 
+# 获取状态配置的值。这是一个封装函数，调用 uci_get 并指定状态目录
 uci_get_state() {
 	uci_get "$1" "$2" "$3" "$4" "/var/state"
 }
 
+# 获取配置选项的值。如果获取失败且提供了默认值，则返回默认值。这是读取配置的基本函数
 uci_get() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -118,6 +126,7 @@ uci_get() {
 	return "$RET"
 }
 
+# 添加一个新的配置节。如果未指定配置名称，则自动生成；否则使用指定的名称。添加后，将新节的名称存储在 CONFIG_SECTION 环境变量中
 uci_add() {
 	local PACKAGE="$1"
 	local TYPE="$2"
@@ -131,6 +140,7 @@ uci_add() {
 	fi
 }
 
+# 重命名配置节或配置选项。可以用于重命名整个配置节或者单个配置选项
 uci_rename() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -140,6 +150,7 @@ uci_rename() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} rename "$PACKAGE.$CONFIG${VALUE:+.$OPTION}=${VALUE:-$OPTION}"
 }
 
+# 删除配置节或配置选项。如果只指定了包和配置节，则删除整个配置节；如果还指定了选项，则只删除该选项
 uci_remove() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -148,6 +159,7 @@ uci_remove() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} del "$PACKAGE.$CONFIG${OPTION:+.$OPTION}"
 }
 
+# 从列表类型的配置选项中删除指定的值。这是 uci_add_list 的反操作
 uci_remove_list() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -157,6 +169,7 @@ uci_remove_list() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} del_list "$PACKAGE.$CONFIG.$OPTION=$VALUE"
 }
 
+# 恢复配置到上一次提交的状态。这个函数操作的是主配置文件，而不是状态文件
 uci_revert() {
 	local PACKAGE="$1"
 	local CONFIG="$2"
@@ -165,6 +178,7 @@ uci_revert() {
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} revert "$PACKAGE${CONFIG:+.$CONFIG}${OPTION:+.$OPTION}"
 }
 
+# 提交配置更改。
 uci_commit() {
 	local PACKAGE="$1"
 	/sbin/uci ${UCI_CONFIG_DIR:+-c $UCI_CONFIG_DIR} commit $PACKAGE
