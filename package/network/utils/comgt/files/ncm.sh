@@ -3,6 +3,9 @@
 # NCM协议处理脚本，用于OpenWrt系统中管理NCM调制解调器连接
 
 [ -n "$INCLUDE_ONLY" ] || {
+	
+	logger -t "NCM" "Init..."
+
 	# 加载OpenWrt通用函数库
 	. /lib/functions.sh
 	# 加载网络接口守护进程协议处理函数
@@ -13,6 +16,9 @@
 
 # NCM协议配置初始化函数
 proto_ncm_init_config() {
+	
+	logger -t "NCM" "$FUNCNAME"
+
 	# 标记此协议不需要物理设备
 	no_device=1
 	# 标记协议可用
@@ -51,6 +57,7 @@ proto_ncm_init_config() {
 proto_ncm_setup() {
 	# 获取接口名称参数
 	local interface="$1"
+	logger -t "NCM" "$FUNCNAME interface:${interface}"
 
 	# 声明本地变量用于存储调制解调器相关信息
 	local manufacturer initialize setmode connect finalize devname devpath ifpath
@@ -61,8 +68,10 @@ proto_ncm_setup() {
 	local context_type
 
 	[ "$metric" = "" ] && metric="0"
+	logger -t "NCM" "$FUNCNAME metric:${metric}"
 
 	[ -n "$profile" ] || profile=1
+	logger -t "NCM" "$FUNCNAME profile:${profile}"
 
 	# 将PDP类型转换为大写
 	pdptype=$(echo "$pdptype" | awk '{print toupper($0)}')
@@ -80,10 +89,13 @@ proto_ncm_setup() {
 	# 如果设置了控制设备则使用它
 	[ -n "$ctl_device" ] && device=$ctl_device
 
+	logger -t "NCM" "$FUNCNAME pdptype:${pdptype} context_type:${context_type} ctl_device:${ctl_device} device:${device}"
+
 	# 检查设备是否已指定
 	[ -n "$device" ] || {
 		# 输出错误信息
 		echo "No control device specified"
+		logger -t "NCM" "$FUNCNAME No control device specified"
 		# 通知协议错误
 		proto_notify_error "$interface" NO_DEVICE
 		# 设置接口不可用
@@ -96,9 +108,12 @@ proto_ncm_setup() {
 	# 检查设备是否存在
 	[ -e "$device" ] || {
 		echo "Control device not valid"
+		logger -t "NCM" "$FUNCNAME Control device not valid"
 		proto_set_available "$interface" 0
 		return 1
 	}
+
+	logger -t "NCM" "$FUNCNAME device:${device}"
 
 	# 如果接口名称未指定，则自动检测
 	[ -z "$ifname" ] && {
@@ -129,17 +144,22 @@ proto_ncm_setup() {
 	# 检查是否成功获取接口名称
 	[ -n "$ifname" ] || {
 		echo "The interface could not be found."
+		logger -t "NCM" "$FUNCNAME The interface could not be found."
 		proto_notify_error "$interface" NO_IFACE
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	logger -t "NCM" "$FUNCNAME ifname:${ifname}"
+
 	# 开始获取调制解调器制造商信息的循环
 	# 记录开始时间
 	start=$(date +%s)
+	logger -t "NCM" "$FUNCNAME start:${start} device:${device}"
 	while true; do
 		# 使用gcom命令获取调制解调器制造商信息
-		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
+		# manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
+		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom)
 		# 如果返回错误则清空制造商信息
 		[ "$manufacturer" = "error" ] && {
 			manufacturer=""
@@ -159,9 +179,13 @@ proto_ncm_setup() {
 			break
 		}
 	done
+
+	logger -t "NCM" "manufacturer:${manufacturer}"
+
 	# 如果未能获取制造商信息则报错退出
 	[ -z "$manufacturer" ] && {
 		echo "Failed to get modem information"
+		logger -t "NCM" "$FUNCNAME Failed to get modem information"
 		proto_notify_error "$interface" GETINFO_FAILED
 		return 1
 	}
@@ -173,6 +197,7 @@ proto_ncm_setup() {
 	# 如果找不到对应制造商配置则报错
 	[ $? -ne 0 ] && {
 		echo "Unsupported modem"
+		logger -t "NCM" "$FUNCNAME Unsupported modem"
 		proto_notify_error "$interface" UNSUPPORTED_MODEM
 		proto_set_available "$interface" 0
 		return 1
@@ -180,10 +205,15 @@ proto_ncm_setup() {
 
 	# 获取初始化命令列表并执行
 	json_get_values initialize initialize
+
+	logger -t "NCM" "initialize:${initialize}"
+
 	# 遍历初始化命令
 	for i in $initialize; do
+		# eval COMMAND="AT+CFUN=1" gcom -d /dev/ttyUSB2 -s /etc/gcom/runcommand.gcom
 		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to initialize modem"
+			logger -t "NCM" "$FUNCNAME Failed to initialize modem"
 			proto_notify_error "$interface" INITIALIZE_FAILED
 			return 1
 		}
@@ -193,6 +223,7 @@ proto_ncm_setup() {
 	[ -n "$pincode" ] && {
 		PINCODE="$pincode" gcom -d "$device" -s /etc/gcom/setpin.gcom || {
 			echo "Unable to verify PIN"
+			logger -t "NCM" "$FUNCNAME Unable to verify PIN"
 			proto_notify_error "$interface" PIN_FAILED
 			proto_block_restart "$interface"
 			return 1
@@ -201,15 +232,22 @@ proto_ncm_setup() {
 
 	# 获取配置命令列表并执行
 	json_get_values configure configure
+
+	logger -t "NCM" "configure:${configure}"
+
 	echo "Configuring modem"
 	# 遍历并执行配置命令
 	for i in $configure; do
+		# eval COMMAND="at+qicsgp=1,1,\\\"3gnet\\\",\\\"user\\\",\\\"password\\\",0" gcom -d /dev/ttyUSB2 -s /etc/gcom/runcommand.gcom
 		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to configure modem"
+			logger -t "NCM" "$FUNCNAME Failed to configure modem"
 			proto_notify_error "$interface" CONFIGURE_FAILED
 			return 1
 		}
 	done
+
+	logger -t "NCM" "mode:${mode}"
 
 	# 如果设置了工作模式则进行配置
 	[ -n "$mode" ] && {
@@ -217,9 +255,11 @@ proto_ncm_setup() {
 		json_get_var setmode "$mode"
 		[ -n "$setmode" ] && {
 			echo "Setting mode"
+			logger -t "NCM" "setmode:${setmode}"
 			# 执行模式设置命令
 			eval COMMAND="$setmode" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 				echo "Failed to set operating mode"
+				logger -t "NCM" "$FUNCNAME Failed to set operating mode"
 				proto_notify_error "$interface" SETMODE_FAILED
 				return 1
 			}
@@ -229,13 +269,16 @@ proto_ncm_setup() {
 
 	# 开始网络连接
 	echo "Starting network $interface"
+	logger -t "NCM" "$FUNCNAME Starting network $interface"
 	# 获取连接命令
 	json_get_vars connect
 	[ -n "$connect" ] && {
 		echo "Connecting modem"
+		logger -t "NCM" "$FUNCNAME Connecting modem,connect=${connect}"
 		# 执行连接命令
 		eval COMMAND="$connect" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to connect"
+			logger -t "NCM" "$FUNCNAME Failed to connect"
 			proto_notify_error "$interface" CONNECT_FAILED
 			return 1
 		}
@@ -246,6 +289,7 @@ proto_ncm_setup() {
 
 	# 设置网络接口
 	echo "Setting up $ifname"
+	logger -t "NCM" "$FUNCNAME Setting up $ifname"
 	# 初始化接口更新（启用）
 	proto_init_update "$ifname" 1
 	# 开始添加协议数据
@@ -314,6 +358,7 @@ proto_ncm_setup() {
 	[ -n "$finalize" ] && {
 		eval COMMAND="$finalize" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to configure modem"
+			logger -t "NCM" "$FUNCNAME Failed to configure modem"
 			proto_notify_error "$interface" FINALIZE_FAILED
 			return 1
 		}
@@ -338,6 +383,7 @@ proto_ncm_teardown() {
 	# 检查设备是否已指定
 	[ -n "$device" ] || {
 		echo "No control device specified"
+		logger -t "NCM" "$FUNCNAME No control device specified"
 		proto_notify_error "$interface" NO_DEVICE
 		# 设置接口不可用
 		proto_set_available "$interface" 0
@@ -349,6 +395,7 @@ proto_ncm_teardown() {
 	# 检查设备是否存在
 	[ -e "$device" ] || {
 		echo "Control device not valid"
+		logger -t "NCM" "$FUNCNAME Control device not valid"
 		proto_set_available "$interface" 0
 		return 1
 	}
@@ -371,6 +418,7 @@ proto_ncm_teardown() {
 		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
 		[ $? -ne 0 -o -z "$manufacturer" ] && {
 			echo "Failed to get modem information"
+			logger -t "NCM" "$FUNCNAME Failed to get modem information"
 			proto_notify_error "$interface" GETINFO_FAILED
 			return 1
 		}
@@ -382,6 +430,7 @@ proto_ncm_teardown() {
 	json_load "$(cat /etc/gcom/ncm.json)"
 	json_select "$manufacturer" || {
 		echo "Unsupported modem"
+		logger -t "NCM" "$FUNCNAME Unsupported modem"
 		proto_notify_error "$interface" UNSUPPORTED_MODEM
 		return 1
 	}
@@ -392,6 +441,7 @@ proto_ncm_teardown() {
 		# 执行断开命令
 		eval COMMAND="$disconnect" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
 			echo "Failed to disconnect"
+			logger -t "NCM" "$FUNCNAME Failed to disconnect"
 			proto_notify_error "$interface" DISCONNECT_FAILED
 			return 1
 		}
