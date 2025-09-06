@@ -7,8 +7,18 @@ opengt
 
 :start
  send "AT+CGMI^m"
- get 1 "" $s
- print $s
+ waitfor 5 "Quectel","OK","ERROR"
+ if % = 0 goto quectel
+ if % = 1 goto continue
+ if % = 2 goto error
+
+:quectel
+ print "quectel"
+ goto continue
+
+:error
+ print "ERROR"
+ exit 1
 
 :continue
  exit 0
