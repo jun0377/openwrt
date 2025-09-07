@@ -87,7 +87,7 @@ list_contains() {
 	[ "${val%% $str *}" != "$val" ]
 }
 
-# 加载uci配置文件
+# 加载uci配置文件到环境变量
 config_load() {
 	[ -n "$IPKG_INSTROOT" ] && return 0
 	uci_load "$@"

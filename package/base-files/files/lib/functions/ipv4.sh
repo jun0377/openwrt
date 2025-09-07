@@ -1,25 +1,32 @@
 uint_max=4294967295
 
+# 10.0.0.0 / 10.255.255.255
 d_10_0_0_0=167772160
 d_10_255_255_255=184549375
 
+# 172.16.0.0 / 172.31.255.255
 d_172_16_0_0=2886729728
 d_172_31_255_255=2887778303
 
+# 192.168.0.0 / 192.168.255.255
 d_192_168_0_0=3232235520
 d_192_168_255_255=3232301055
 
+# 169.254.0.0 / 169.254.255.255
 d_169_254_0_0=2851995648
 d_169_254_255_255=2852061183
 
+# 127.0.0.0 / 127.255.255.255
 d_127_0_0_0=2130706432
 d_127_255_255_255=2147483647
 
+# 224.0.0.0 / 239.255.255.255
 d_224_0_0_0=3758096384
 d_239_255_255_255=4026531839
 
 # check that $1 is only base 10 digits, and that it doesn't
 # exceed 2^32-1
+# 检查参数是否为有效的32位无符号整数
 assert_uint32() {
     local __n="$1"
 
@@ -42,6 +49,7 @@ assert_uint32() {
 }
 
 # return a count of the number of bits set in $1
+# 计算一个32位整数中设置为1的位数（即二进制表示中1的个数）
 bitcount() {
     local __var="$1" __c="$2"
     assert_uint32 "$__c" || return 1
@@ -58,6 +66,8 @@ bitcount() {
 # tedious but portable with busybox's limited shell
 # we check each octet to be in the range of 0..255,
 # and also make sure there's no extaneous characters.
+
+# 将点分十进制 IP 地址字符串转换为32位整数
 str2ip() {
     local __var="$1" __ip="$2" __n __val=0
 
@@ -155,6 +165,7 @@ str2ip() {
 }
 
 # convert back from an integer to dotted-quad.
+# 将32位整数表示的 IP 地址转换回点分十进制字符串格式
 ip2str() {
     local __var="$1" __n="$2"
     assert_uint32 "$__n" || return 1
@@ -163,6 +174,7 @@ ip2str() {
 }
 
 # convert prefix into an integer bitmask
+# 将 CIDR 前缀长度（如 /24）转换为对应的网络掩码整数值
 prefix2netmask() {
     local __var="$1" __n="$2"
     assert_uint32 "$__n" || return 1
@@ -175,6 +187,7 @@ prefix2netmask() {
     export -- "$__var=$(((~(uint_max >> __n)) & uint_max))"
 }
 
+# 检查一个位掩码是否连续（所有1位都在高位，所有0位都在低位）
 _is_contiguous() {
     local __x="$1"	# no checking done
     local __y=$((~__x & uint_max))
@@ -185,6 +198,8 @@ _is_contiguous() {
 
 # check argument as being contiguous upper bits (and yes,
 # 0 doesn't have any discontiguous bits).
+
+# 检查参数是否为连续的位掩码（有效的网络掩码）
 is_contiguous() {
     local __var="$1" __x="$2" __val=0
     assert_uint32 "$__x" || return 1
@@ -199,6 +214,7 @@ is_contiguous() {
 
 # convert mask to prefix, validating that it's a conventional
 # (contiguous) netmask.
+# 将网络掩码整数值转换为 CIDR 前缀长度，同时验证掩码是否为常规（连续）掩码
 netmask2prefix() {
     local __var="$1" __n="$2" __cont __bits
     assert_uint32 "$__n" || return 1
@@ -215,6 +231,7 @@ netmask2prefix() {
 }
 
 # check the argument as being an rfc-1918 address
+# 检查 IP 地址是否为 RFC 1918 定义的私有地址
 is_rfc1918() {
     local __var="$1" __x="$2" __val=0
     assert_uint32 "$__x" || return 1
@@ -231,6 +248,7 @@ is_rfc1918() {
 }
 
 # check the argument as being an rfc-3927 address
+# 检查 IP 地址是否为 RFC 3927 定义的链路本地地址（169.254.0.0/16）
 is_rfc3927() {
     local __var="$1" __x="$2" __val=0
     assert_uint32 "$__x" || return 1
@@ -243,6 +261,7 @@ is_rfc3927() {
 }
 
 # check the argument as being an rfc-1122 loopback address
+# 检查 IP 地址是否为 RFC 1122 定义的环回地址（127.0.0.0/8）
 is_loopback() {
     local __var="$1" __x="$2" __val=0
     assert_uint32 "$__x" || return 1
@@ -255,6 +274,7 @@ is_loopback() {
 }
 
 # check the argument as being a multicast address
+# 检查 IP 地址是否为多播地址（224.0.0.0/4）
 is_multicast() {
     local __var="$1" __x="$2" __val=0
     assert_uint32 "$__x" || return 1

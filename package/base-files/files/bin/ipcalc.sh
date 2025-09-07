@@ -7,6 +7,8 @@ PROG="$(basename "$0")"
 # wrapper to convert an integer to an address, unless we're using
 # decimal output format.
 # hook for library function
+
+# 将整数形式的 IP 地址转换为字符串格式
 _ip2str() {
     local var="$1" n="$2"
     assert_uint32 "$n" || exit 1
