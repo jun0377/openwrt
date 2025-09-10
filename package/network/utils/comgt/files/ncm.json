@@ -88,7 +88,25 @@
 			"gsm": "AT+QCFG=\\\"nwscanmode\\\",1",
 			"auto": "AT+QCFG=\\\"nwscanmode\\\",0"
 		},
-		"connect": "AT+qnetdevctl=1,${profile},1",
+		"module": "AT+CGMM",
+		"version": "ATI",
+		"echoon": "ATE1",
+		"imei": "AT+CGSN",
+		"simin": "AT+CPIN?",
+		"apnget": "AT+CGDCONT?",
+		"apnset": "AT+CGDCONT=1,\\\"IP\\\",\\\"${apn}\\\"",
+		"operator": "AT+QSPN",
+		"netprefget": "AT+QNWPREFCFG=\\\"mode_pref\\\"",
+		"net": {
+			"auto":"AT+QNWPREFCFG=\\\"mode_pref\\\",AUTO",
+			"sa":"AT+QNWPREFCFG=\\\"mode_pref\\\",NR5G-SA",
+			"nsa":"AT+QNWPREFCFG=\\\"mode_pref\\\",NR5G-NSA"
+		},
+		"authset": "AT+QICSGP=1,3,\\\"${apn}\\\",\\\"${user}\\\",\\\"${password}\\\",2",
+		"authget": "AT+QICSGP?",
+		"ipget": "AT+CGPADDR",
+		"signalget": "AT+QENG=\\\"servingcell\\\"",
+		"connect": "AT+QNETDEVCTL=1,1,0",
 		"disconnect": "AT+qnetdevctl=0,${profile},0"
 	},
 	"\"zte": {
