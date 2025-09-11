@@ -1,0 +1,24 @@
+opengt
+ set com 115200n81
+ set comecho off
+ set senddelay 0.02
+ waitquiet 0.2 0.2
+ flash 0.1
+
+:start
+ send "AT+CGMM^m"
+ waitfor 5 "RM500U-CNV","OK","ERROR"
+ if % = 0 goto rm500u
+ if % = 1 goto continue
+ if % = 2 goto error
+
+:rm500u
+ print "RM500U-CNV"
+ goto continue
+
+:error
+ print "ERROR"
+ exit 1
+
+:continue
+ exit 0

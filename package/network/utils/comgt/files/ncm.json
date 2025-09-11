@@ -88,11 +88,6 @@
 			"gsm": "AT+QCFG=\\\"nwscanmode\\\",1",
 			"auto": "AT+QCFG=\\\"nwscanmode\\\",0"
 		},
-		"module": "AT+CGMM",
-		"version": "ATI",
-		"echoon": "ATE1",
-		"imei": "AT+CGSN",
-		"simin": "AT+CPIN?",
 		"apnget": "AT+CGDCONT?",
 		"apnset": "AT+CGDCONT=1,\\\"IP\\\",\\\"${apn}\\\"",
 		"operator": "AT+QSPN",
@@ -109,7 +104,7 @@
 		"connect": "AT+QNETDEVCTL=1,1,0",
 		"disconnect": "AT+qnetdevctl=0,${profile},0"
 	},
-	"\"zte": {
+	"zte": {
 		"initialize": [
 			"AT+CFUN=1"
 		],

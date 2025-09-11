@@ -205,68 +205,57 @@ proto_ncm_setup() {
 	}
 
 	# 获取模组名称
-	local module module_name
-	json_get_value module module
-	logger -t "NCM" "module:${module}"
-	for i in {1..3}; do
-		local res=$(eval COMMAND=${module} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
-			local line=$(echo ${res} | grep "+CGMM:")
-			[ ! -z ${line} ] && module_name=$(echo "$line" | awk -F': ' '{print $2}')
-			[ ! -z ${module_name} ] && {
-				# TODO: 保存到UCI配置文件中，避免重复查询
-			}
-		}
+	local module
+	for i in 1 2 3; do
+		module=$(comgt -d ${device} -s /etc/gcom/getmodule.gcom)
+		if [ ! -z "${module}" ]; then
+			logger -t "NCM" "module:${module}"
+			# TODO: 保存到UCI配置文件中，避免重复查询
+		fi
 	done
 
-	logger -t "NCM" "module_name:${module_name}"
+	logger -t "NCM" "module:${module}"
 
 	# 获取模组版本号
-	local getversion version
-	json_get_value getversion version
-	logger -t "NCM" "getversion: ${getversion}"
+	local version
+	# TODO: 清空UCI配置文件
 	for i in {1..3}; do
-		local res=$(eval COMMAND=${getversion} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
-			local line=$(echo ${res} | grep "Revision:")
-			[ ! -z ${line} ] && version=$(echo "$line" | awk -F': ' '{print $2}')
-			[ ! -z ${version} ] && {
-				# TODO: 保存到UCI配置文件中，避免重复查询
-			}
-		}
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getmoduleversion.gcom
+		version=$(comgt -d ${device} -s /etc/gcom/getmoduleversion.gcom | tr -d '\r')
+		version=$(echo "${version}" | awk -F 'Revision: ' '{print $2}' | awk '{gsub(/ *OK$/,""); print $0}')
+		logger -t "NCM" "version:${version}"
+		# TODO: 保存到UCI配置文件中，避免重复查询
 	done
 
 	logger -t "NCM" "version: ${version}"
 
 	# 获取模组IMEI码
-	local getimei imei
-	json_get_value getimei imei
-	logger -t "NCM" "getimei: ${getimei}"
+	local imei
+	# TODO: 清空UCI配置文件
 	for i in {1..3}; do
-		local res=$(eval COMMAND=${getimei} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
-			local line=$(echo ${res} | grep "Revision:")
-			[ ! -z ${line} ] && imei=$(echo "$line" | awk -F': ' '{print $2}')
-			[ ! -z ${imei} ] && {
-				# TODO: 保存到UCI配置文件中，避免重复查询
-			}
-		}
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getimei.gcom
+		imei=$(comgt -d ${device} -s /etc/gcom/getimei.gcom | tr -d '\r')
+		logger -t "NCM" "imei: ${imei}"
+	# 	local res=$(eval COMMAND=${getimei} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
+	# 		local line=$(echo ${res} | grep "Revision:")
+	# 		[ ! -z ${line} ] && imei=$(echo "$line" | awk -F': ' '{print $2}')
+	# 		[ ! -z ${imei} ] && {
+	# 			# TODO: 保存到UCI配置文件中，避免重复查询
+	# 		}
+	# 	}
 	done
 
 	logger -t "NCM" "imei: ${imei}"
 
 	# 查询是否插卡
-	local getsimin simin
-	json_get_value getsimin simin
-	logger -t "NCM" "getsimin: ${getsimin}"
+	local simin
 	for i in {1..3}; do
-		local res=$(eval COMMAND=${getsimin} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
-			local line=$(echo ${res} | grep "Revision:")
-			[ ! -z ${line} ] && simin=$(echo "$line" | awk -F': ' '{print $2}')
-			[ ! -z ${simin} ] && {
-				# TODO: 保存到UCI配置文件中，避免重复查询
-			}
-		}
+		simin=$(comgt -d ${device} -s /etc/gcom/getsimin.gcom | tr -d '\r')
+		logger -t "NCM" "simin: ${simin}"
+		# TODO: 保存到UCI配置文件中，避免重复查询
 	done
 
-	logger -t "NCM" "sim: ready"
+	# logger -t "NCM" "sim: ready"
 
 	# 获取初始化命令列表并执行
 	json_get_values initialize initialize
