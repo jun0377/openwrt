@@ -10,6 +10,8 @@
 	. /lib/functions.sh
 	# 加载网络接口守护进程协议处理函数
 	. ../netifd-proto.sh
+	# 用于通过/dev/ttyUSB找到对应的USB总线和端口号，以确定是哪个模组
+	. ./index.sh
 	# 初始化协议处理器
 	logger -t "NCM" "$@"
 	init_proto "$@"
@@ -54,8 +56,10 @@ proto_ncm_init_config() {
 	proto_config_add_defaults
 }
 
+
 # NCM协议连接建立函数
 proto_ncm_setup() {
+
 	# 获取接口名称参数
 	local interface="$1"
 	logger -t "NCM" "$FUNCNAME interface:${interface}"
@@ -204,140 +208,282 @@ proto_ncm_setup() {
 		return 1
 	}
 
+	# 获取USB总线和端口号
+	local USB=$(get_usb_by_ttyUSB ${device})
+	logger -t "NCM" "$FUNCNAME ${USB}"
+	# 获取uci配置section
+	local uci_section=$(get_simindex_by_usb ${USB})
+	logger -t "NCM" "$FUNCNAME uci section:${uci_section}"
+
+	# UCI配置文件待确认
+	uci set sim.${uci_section}.confirmed=0 && uci commit sim
+	logger -t "NCM" "uci set sim.${uci_section}.confirmed=1 && uci commit sim"
+
+	# 保存USB总线和端口号到UCI配置文件
+	OLD_USB=$(uci get sim.${uci_section}.usb)
+	if [ "${OLD_USB}" != "${USB}" ]; then
+		uci set sim.${uci_section}.usb=${USB} && uci commit sim
+		logger -t "NCM" "$FUNCNAME uci set sim.${uci_section}.usb=${USB} && uci commit sim"
+	fi
+
 	# 获取模组名称
-	local module
+	local module old_module
 	for i in 1 2 3; do
 		module=$(comgt -d ${device} -s /etc/gcom/getmodule.gcom)
 		if [ ! -z "${module}" ]; then
-			logger -t "NCM" "module:${module}"
-			# TODO: 保存到UCI配置文件中，避免重复查询
+			old_module=$(uci get sim.${uci_section}.module)
+			[ "${old_module}" != "${module}" ] && { 
+				uci set sim.${uci_section}.module=${module} && uci commit sim
+				logger -t "NCM" "old_module:[${old_module}] | module:[${module}]"
+				logger -t "NCM" "uci set sim.${uci_section}.module=${module} && uci commit sim"
+			}
+
+			break
 		fi
 	done
 
-	logger -t "NCM" "module:${module}"
+	logger -t "NCM" "module:[${module}]"
+
+	# 设置工作模式为NCM
+	for i in $(seq 1 3); do
+		mode=$(comgt -d ${device} -s /etc/gcom/getmode.gcom | tr -d '\r\n')
+		mode=$(echo ${mode} | grep -o '+QCFG:.*')
+		mode=$(echo ${mode} | grep -oE '[0-9]+')
+		[ "$mode" != "5" ] && {
+			# MODE=5 comgt -d /dev/ttyUSB2 -s /etc/gcom/setmode.gcom
+			ret=$(MODE=5 comgt -d ${device} -s /etc/gcom/setmode.gcom | tr -d '\r\n')
+			if echo "${ret}" | grep -q "OK"; then
+				logger -t "NCM" "set apn ${apn} succeed!"
+				break
+			else
+				logger -t "NCM" "set apn ${apn} failed!"
+			fi
+		}
+	done
+
 
 	# 获取模组版本号
-	local version
-	# TODO: 清空UCI配置文件
-	for i in {1..3}; do
+	local version old_version
+	for i in 1 2 3; do
 		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getmoduleversion.gcom
 		version=$(comgt -d ${device} -s /etc/gcom/getmoduleversion.gcom | tr -d '\r')
 		version=$(echo "${version}" | awk -F 'Revision: ' '{print $2}' | awk '{gsub(/ *OK$/,""); print $0}')
-		logger -t "NCM" "version:${version}"
-		# TODO: 保存到UCI配置文件中，避免重复查询
+		version=$(echo "${version}" | xargs)
+		[ ! -z ${version} ] && {
+			
+			# 保存到uci配置文件
+			old_version=$(uci get sim.${uci_section}.moduleVersion)
+			[ "${old_version}" != "${version}" ] && {
+				uci set sim.${uci_section}.moduleVersion=${version} && uci commit sim
+				logger -t "NCM" "old_version:[${old_version}] | version:[${version}]"
+				logger -t "NCM" "uci set sim.${uci_section}.moduleVersion=${version} && uci commit sim"
+			}
+
+			break
+		}
+
 	done
 
-	logger -t "NCM" "version: ${version}"
+	logger -t "NCM" "version:[${version}]"
 
 	# 获取模组IMEI码
-	local imei
-	# TODO: 清空UCI配置文件
-	for i in {1..3}; do
+	local imei old_imei
+	for i in 1 2 3; do
 		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getimei.gcom
 		imei=$(comgt -d ${device} -s /etc/gcom/getimei.gcom | tr -d '\r')
-		logger -t "NCM" "imei: ${imei}"
-	# 	local res=$(eval COMMAND=${getimei} gcom -d "${device}" -s /etc/gcom/runcommand.gcom) || {
-	# 		local line=$(echo ${res} | grep "Revision:")
-	# 		[ ! -z ${line} ] && imei=$(echo "$line" | awk -F': ' '{print $2}')
-	# 		[ ! -z ${imei} ] && {
-	# 			# TODO: 保存到UCI配置文件中，避免重复查询
-	# 		}
-	# 	}
+		imei=$(echo ${imei} | sed 's/.*[^0-9]\([0-9]\{15\}\).*/\1/')
+		[ ! -z ${imei} ] && {
+			# 保存到uci配置文件
+			old_imei=$(uci get sim.${uci_section}.imei)
+			[ "${old_imei}" != "${imei}" ] && {
+				uci set sim.${uci_section}.imei=${imei} && uci commit sim
+				logger -t "NCM" "old_imei:[${old_imei}] | imei:[${imei}]"
+				logger -t "NCM" "uci set sim.${uci_section}.imei=${imei} && uci commit sim"
+			}
+
+			break
+		}
 	done
 
-	logger -t "NCM" "imei: ${imei}"
+	logger -t "NCM" "imei:[${imei}]"
 
 	# 查询是否插卡
 	local simin
-	for i in {1..3}; do
+	for i in $(seq 1 3); do
 		simin=$(comgt -d ${device} -s /etc/gcom/getsimin.gcom | tr -d '\r')
-		logger -t "NCM" "simin: ${simin}"
-		# TODO: 保存到UCI配置文件中，避免重复查询
+		if echo "${simin}" | grep -q "READY"; then
+			break
+		fi		
 	done
 
-	# logger -t "NCM" "sim: ready"
+	if echo "${simin}" | grep -q "READY"; then
+		logger -t "NCM" "sim ready"
+	else
+		logger -t "NCM" "sim not ready! return now..." && return 1
+	fi	
 
-	# 获取初始化命令列表并执行
-	json_get_values initialize initialize
-	logger -t "NCM" "initialize:${initialize}"
-	# 遍历初始化命令
-	for i in $initialize; do
-		# eval COMMAND="AT+CFUN=1" gcom -d /dev/ttyUSB2 -s /etc/gcom/runcommand.gcom
-		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
-			echo "Failed to initialize modem"
-			logger -t "NCM" "$FUNCNAME Failed to initialize modem"
-			proto_notify_error "$interface" INITIALIZE_FAILED
-			return 1
-		}
-	done
-
-	# 如果设置了PIN码则进行验证
-	[ -n "$pincode" ] && {
-		PINCODE="$pincode" gcom -d "$device" -s /etc/gcom/setpin.gcom || {
-			echo "Unable to verify PIN"
-			logger -t "NCM" "$FUNCNAME Unable to verify PIN"
-			proto_notify_error "$interface" PIN_FAILED
-			proto_block_restart "$interface"
-			return 1
-		}
-	}
-
-	# 获取配置命令列表并执行
-	json_get_values configure configure
-
-	logger -t "NCM" "configure:${configure}"
-
-	echo "Configuring modem"
-	# 遍历并执行配置命令
-	for i in $configure; do
-		# eval COMMAND="at+qicsgp=1,1,\\\"3gnet\\\",\\\"user\\\",\\\"password\\\",0" gcom -d /dev/ttyUSB2 -s /etc/gcom/runcommand.gcom
-		eval COMMAND="$i" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
-			echo "Failed to configure modem"
-			logger -t "NCM" "$FUNCNAME Failed to configure modem"
-			proto_notify_error "$interface" CONFIGURE_FAILED
-			return 1
-		}
-	done
-
-	logger -t "NCM" "mode:${mode}"
-
-	# 如果设置了工作模式则进行配置
-	[ -n "$mode" ] && {
-		json_select modes
-		json_get_var setmode "$mode"
-		[ -n "$setmode" ] && {
-			echo "Setting mode"
-			logger -t "NCM" "setmode:${setmode}"
-			# 执行模式设置命令
-			eval COMMAND="$setmode" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
-				echo "Failed to set operating mode"
-				logger -t "NCM" "$FUNCNAME Failed to set operating mode"
-				proto_notify_error "$interface" SETMODE_FAILED
-				return 1
+	# 查询IMSI
+	local imsi old_imsi
+	for i in $(seq 1 3); do
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getimsi.gcom
+		imsi=$(comgt -d ${device} -s /etc/gcom/getimsi.gcom | tr -d '\r')
+		imsi=$(echo ${imsi} | sed 's/.*[^0-9]\([0-9]\{15\}\).*/\1/')
+		[ ! -z ${imsi} ] && {
+			# 保存到uci配置文件
+			old_imsi=$(uci get sim.${uci_section}.imsi)
+			[ "${old_imsi}" != "${imsi}" ] && {
+				uci set sim.${uci_section}.imsi=${imsi} && uci commit sim
+				logger -t "NCM" "old_imsi:[${old_imsi}] | imsi:[${imsi}]"
+				logger -t "NCM" "uci set sim.${uci_section}.imsi=${imsi} && uci commit sim"
 			}
-		}
-		json_select ..
-	}
 
-	# 开始网络连接
-	echo "Starting network $interface"
-	logger -t "NCM" "$FUNCNAME Starting network $interface"
-	# 获取连接命令
-	json_get_vars connect
-	[ -n "$connect" ] && {
-		echo "Connecting modem"
-		logger -t "NCM" "$FUNCNAME Connecting modem,connect=${connect}"
-		# 执行连接命令
-		eval COMMAND="$connect" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
-			echo "Failed to connect"
-			logger -t "NCM" "$FUNCNAME Failed to connect"
-			proto_notify_error "$interface" CONNECT_FAILED
-			return 1
+			break
 		}
-	}
+	done
 
-	# 获取最终化命令
-	json_get_vars finalize
+	logger -t "NCM" "imsi:[${imsi}]"
+
+	# 查询运营商
+	local operator old_operator
+	for i in $(seq 1 3); do
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getoperator.gcom
+		# AT+QNWINFO
+		# +QNWINFO: "NR5G-SA",46011,"NR N78",627264
+		# OK
+		operator=$(comgt -d ${device} -s /etc/gcom/getoperator.gcom | tr -d '\r\n')
+		logger -t "NCM" "operator:${operator}"
+		operator=$(echo ${operator} | sed -n 's/.*+QNWINFO: "[^"]*",\([0-9]*\).*/\1/p')
+		logger -t "NCM" "operator:${operator}"
+		[ ! -z ${operator} ] && {
+			# 保存到uci配置文件
+			old_operator=$(uci get sim.${uci_section}.operator)
+			[ "${old_operator}" != ${operator} ] && {
+				uci set sim.${uci_section}.operator=${operator} && uci commit sim
+				logger -t "NCM" "old_operator:[${old_operator}] | operator:[${operator}]"
+				logger -t "NCM" "uci set sim.${uci_section}.operator=${operator} && uci commit sim"
+			}
+
+			break
+		}
+
+	done
+
+	logger -t "NCM" "operator:[${operator}]"
+
+	# 设置入网方式
+	local net=$(uci get sim.${uci_section}.net)
+	net=$(echo ${net} | tr 'A-Z' 'a-z')
+	logger -t "NCM" "uci sim net:${net}"
+	local gcom=setnetauto.gcom
+	case "${net}" in
+		"auto")
+			gcom=setnetauto.gcom
+			;;
+		"sa")
+			gcom=setnetsa.gcom
+			;;
+		"nsa")
+			gcom=setnetnsa.gcom
+			;;
+		"lte")
+			gcom=setnetlte.gcom
+			;;
+		*)
+			logger -t "NCM" "unknown net:${net}! set auto..."
+			net=auto
+			uci set sim.${uci_section}.net=auto && uci commit sim
+			logger -t "NCM" "uci set sim.${uci_section}.net=auto && uci commit sim"
+			gcom=setnetauto.gcom
+			;;
+	esac
+
+	for i in $(seq 1 3); do
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/setnetauto.gcom
+		ret=$(comgt -d ${device} -s /etc/gcom/${gcom} | tr -d '\r')
+		if echo "${ret}" | grep -q "OK"; then
+			logger -t "NCM" "set net ${net} succeed!"
+			break
+		else
+			logger -t "NCM" "set net ${net} failed!"
+		fi
+	done
+
+	# 设置APN
+	apn=$(uci get sim.${uci_section}.apn)
+	logger -t "NCM" "uci sim apn:${apn}"
+	for i in $(seq 1 3); do
+		# APN=3gnet comgt -d /dev/ttyUSB2 -s /etc/gcom/setapn.gcom
+		ret=$(APN=${apn} comgt -d /dev/ttyUSB2 -s /etc/gcom/setapn.gcom | tr -d '\r\n')
+		if echo "${ret}" | grep -q "OK"; then
+			logger -t "NCM" "set apn ${apn} succeed!"
+			break
+		else
+			logger -t "NCM" "set apn ${apn} failed!"
+		fi
+	done
+
+	# 设置鉴权
+	auth=$(uci get sim.${uci_section}.auth)
+	username=$(uci get sim.${uci_section}.user)
+	password=$(uci get sim.${uci_section}.passwd)
+	auth=$(echo ${auth} | tr 'A-Z' 'a-z')
+	logger -t "NCM" "uci sim auth:${auth}"
+	logger -t "NCM" "uci sim username:${username}"
+	logger -t "NCM" "uci sim password:${password}"
+
+	local AUTH
+	case "${auth}" in
+		"none")
+			AUTH=0
+			;;
+		"pap")
+			AUTH=1
+			;;
+		"chap")
+			AUTH=2
+			;;
+		"auto")
+			AUTH=3
+			;;
+		*)
+			AUTH=0
+			;;
+	esac
+
+	for i in $(seq 1 3); do
+		# APN=3gnet USER=user PASSWD=passwd AUTH=0 comgt -d /dev/ttyUSB2 -s /etc/gcom/setauth.gcom
+		ret=$(APN=${apn} USER=${username} PASSWD=${password} AUTH=${AUTH} comgt -d ${device} -s /etc/gcom/setauth.gcom | tr -d '\r\n')
+		if echo "${ret}" | grep -q "OK"; then
+			logger -t "NCM" "set auth apn:${apn} auth:${auth} user:${username} passwd:${password} succeed!"
+			break
+		else
+			logger -t "NCM" "set auth apn:${apn} auth:${auth} user:${username} passwd:${password} failed!"
+		fi
+	done
+
+	# 拨号
+	for i in $(seq 1 3); do
+		# comgt -d /dev/ttyUSB2 -s /etc/gcom/dial.gcom
+		ret=$(comgt -d ${device} -s /etc/gcom/dial.gcom | tr -d '\r\n')
+		if echo "${ret}" | grep -q "OK"; then
+			logger -t "NCM" "dial succeed!"
+			break
+		else
+			logger -t "NCM" "dial failed!"
+		fi
+	done
+
+	# 拨号指令执行失败
+	if echo "${ret}" | grep -q "OK"; then
+		logger -t "NCM" "dial succeed!"
+	else
+		proto_notify_error "$interface" CONNECT_FAILED
+		return 1
+	fi
+
+	# uci配置文件确认成功
+	uci set sim.${uci_section}.confirmed=1 && uci commit sim
+	logger -t "NCM" "uci set sim.${uci_section}.confirmed=1 && uci commit sim"
 
 	# 设置网络接口
 	echo "Setting up $ifname"
@@ -407,14 +553,14 @@ proto_ncm_setup() {
 	}
 
 	# 如果有最终化命令则执行
-	[ -n "$finalize" ] && {
-		eval COMMAND="$finalize" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
-			echo "Failed to configure modem"
-			logger -t "NCM" "$FUNCNAME Failed to configure modem"
-			proto_notify_error "$interface" FINALIZE_FAILED
-			return 1
-		}
-	}
+	# [ -n "$finalize" ] && {
+	# 	eval COMMAND="$finalize" gcom -d "$device" -s /etc/gcom/runcommand.gcom || {
+	# 		echo "Failed to configure modem"
+	# 		logger -t "NCM" "$FUNCNAME Failed to configure modem"
+	# 		proto_notify_error "$interface" FINALIZE_FAILED
+	# 		return 1
+	# 	}
+	# }
 }
 
 # NCM协议连接断开函数

@@ -1,0 +1,22 @@
+# set APN from environment
+opengt
+ set com 115200n81
+ set senddelay 0.02
+ waitquiet 1 0.2
+ flash 0.1
+
+:start
+ #send "AT+CGDCONT=1,\"IP\",$env(\"APN\")^m"
+ #AT+QICSGP=1,3,"3gnet","cogent","cogent",2
+ send "AT+QICSGP=1,1,\""
+ send $env("APN")
+ send "\",\""
+ send $env("USER")
+ send "\",\""
+ send $env("PASSWD")
+ send "\","
+ send $env("AUTH")
+ send "^m"
+ get 1 "" $s
+ print $s
+

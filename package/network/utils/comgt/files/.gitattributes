@@ -1,0 +1,44 @@
+*               text=auto
+
+# Sources
+# use unix lf
+*.c     text eol=lf
+*.cpp   text eol=lf
+*.hpp   text eol=lf
+*.h     text eol=lf
+*.py    text eol=lf
+*.conf  text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+*.txt   text eol=lf
+*.md    text eol=lf
+#use unix lf
+*.sh    text eol=lf
+*.json  text eol=lf
+
+#nochange
+*.zip  -text
+
+# Compiled Object files
+*.o     binary
+*.d     binary
+*.cgi   binary
+*.bit   binary
+
+# Compiled Dynamic libraries
+*.so    binary
+
+# Picture
+*.png   -text
+
+# Compiled Static libraries
+*.la    binary
+*.a     binary
+*.lib   binary
+
+# Executables
+*.exe   binary
+*.out   binary
+*.app   binary
+cmu_3g_app   binary
