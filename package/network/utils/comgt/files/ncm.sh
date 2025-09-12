@@ -219,6 +219,10 @@ proto_ncm_setup() {
 	uci set sim.${uci_section}.confirmed=0 && uci commit sim
 	logger -t "NCM" "uci set sim.${uci_section}.confirmed=1 && uci commit sim"
 
+	# 清除UCI配置文件中的sim IMSI
+	uci set sim.${uci_section}.imsi=none && uci commit sim
+	logger -t "NCM" "uci set sim.${uci_section}.imsi=${imsi} && uci commit sim"
+
 	# 保存USB总线和端口号到UCI配置文件
 	OLD_USB=$(uci get sim.${uci_section}.usb)
 	if [ "${OLD_USB}" != "${USB}" ]; then
@@ -329,14 +333,8 @@ proto_ncm_setup() {
 		imsi=$(comgt -d ${device} -s /etc/gcom/getimsi.gcom | tr -d '\r')
 		imsi=$(echo ${imsi} | sed 's/.*[^0-9]\([0-9]\{15\}\).*/\1/')
 		[ ! -z ${imsi} ] && {
-			# 保存到uci配置文件
-			old_imsi=$(uci get sim.${uci_section}.imsi)
-			[ "${old_imsi}" != "${imsi}" ] && {
-				uci set sim.${uci_section}.imsi=${imsi} && uci commit sim
-				logger -t "NCM" "old_imsi:[${old_imsi}] | imsi:[${imsi}]"
-				logger -t "NCM" "uci set sim.${uci_section}.imsi=${imsi} && uci commit sim"
-			}
-
+			uci set sim.${uci_section}.imsi=${imsi} && uci commit sim
+			logger -t "NCM" "uci set sim.${uci_section}.imsi=${imsi} && uci commit sim"
 			break
 		}
 	done
