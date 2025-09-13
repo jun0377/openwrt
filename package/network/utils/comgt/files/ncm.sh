@@ -372,32 +372,35 @@ proto_ncm_setup() {
 	local net=$(uci get sim.${uci_section}.net)
 	net=$(echo ${net} | tr 'A-Z' 'a-z')
 	logger -t "NCM" "uci sim net:${net}"
-	local gcom=setnetauto.gcom
+	local NET=AUTO
 	case "${net}" in
 		"auto")
-			gcom=setnetauto.gcom
+			NET=AUTO
 			;;
 		"sa")
-			gcom=setnetsa.gcom
+			NET=NR5G-SA
 			;;
 		"nsa")
-			gcom=setnetnsa.gcom
+			NET=NR5G-NSA
 			;;
 		"lte")
-			gcom=setnetlte.gcom
+			NET=LTE
 			;;
 		*)
 			logger -t "NCM" "unknown net:${net}! set auto..."
 			net=auto
 			uci set sim.${uci_section}.net=auto && uci commit sim
 			logger -t "NCM" "uci set sim.${uci_section}.net=auto && uci commit sim"
-			gcom=setnetauto.gcom
+			NET=AUTO
 			;;
 	esac
 
 	for i in $(seq 1 3); do
-		# comgt -d /dev/ttyUSB2 -s /etc/gcom/setnetauto.gcom
-		ret=$(comgt -d ${device} -s /etc/gcom/${gcom} | tr -d '\r')
+		# NET=AUTO comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
+		# NET=NR5G-SA comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
+		# NET=NR5G-NSA comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
+		# NET=LTE comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
+		ret=$(NET=${NET} comgt -d ${device} -s /etc/gcom/setnet.gcom | tr -d '\r')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "set net ${net} succeed!"
 			break

@@ -6,7 +6,8 @@ opengt
  flash 0.1
 
 :start
- send "AT+QNWPREFCFG=\"mode_pref\",NR5G-SA^m"
+ send "AT+QNWPREFCFG=\"mode_pref\","
+ send $env("NET")
+ send "^m"
  get 3 "" $s
  print $s
-
