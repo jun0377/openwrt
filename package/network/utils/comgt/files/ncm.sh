@@ -2,6 +2,34 @@
 
 # NCM协议处理脚本，用于OpenWrt系统中管理NCM调制解调器连接
 
+
+
+# 通过usb总线号和端口号，获取/dev/ttyUSBx
+function get_usb_by_ttyUSB()
+{
+    # /dev/ttyUSB2 => ttyUSB2
+    local ttyUSB=$(basename $1)
+    local USB=$(find /sys/devices/platform -name ${ttyUSB} | head -n 1 | awk -F'/' '{print $(NF-1)}')
+    echo ${USB}
+}
+# 通过usb总线号和端口号，获取链路名称
+function get_simindex_by_usb()
+{
+    local USB=$1
+    [ "${USB}" == "2-1:1.4" ] && echo "SIM_5G_1" && return
+    [ "${USB}" == "2-2:1.4" ] && echo "SIM_5G_2" && return
+    [ "${USB}" == "2-3:1.4" ] && echo "SIM_5G_3" && return
+}
+
+
+
+
+
+
+
+
+
+
 [ -n "$INCLUDE_ONLY" ] || {
 	
 	logger -t "NCM" "Init..."
@@ -10,8 +38,6 @@
 	. /lib/functions.sh
 	# 加载网络接口守护进程协议处理函数
 	. ../netifd-proto.sh
-	# 用于通过/dev/ttyUSB找到对应的USB总线和端口号，以确定是哪个模组
-	. ./index.sh
 	# 初始化协议处理器
 	logger -t "NCM" "$@"
 	init_proto "$@"
@@ -69,6 +95,14 @@ proto_ncm_setup() {
 
 	local device ifname  apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
 	json_get_vars device ifname apn auth username password pincode delay mode pdptype sourcefilter delegate profile $PROTO_DEFAULT_OPTIONS
+
+	# 删除串行设备锁文件
+	LOCK_FILE=/var/lock/LCK..$(basename ${device})
+	logger -t "NCM" "$FUNCNAME Lock_file:${LOCK_FILE}"
+	[ -f ${LOCK_FILE} ] && {
+		rm -rf ${LOCK_FILE}
+		logger -t "NCM" "$FUNCNAME rm ${LOCK_FILE}"
+	}
 
 	local context_type
 
@@ -162,17 +196,23 @@ proto_ncm_setup() {
 	start=$(date +%s)
 	logger -t "NCM" "$FUNCNAME start:${start} device:${device}"
 	while true; do
-		# 使用gcom命令获取调制解调器制造商信息
-		# manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
-		manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom)
+		manufacturer=$(rm -rf ${LOCK_FILE};echo -e 'AT+CGMI\r' | microcom "$device" -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		if echo ${manufacturer} | grep -q 'OK'; then
+			manufacturer=$(echo ${manufacturer} | cut -d ' ' -f 1 | tr 'A-Z' 'a-z' | tr -d '\r\n')
+		else
+			manufacturer=error
+		fi
+
 		# 如果返回错误则清空制造商信息
 		[ "$manufacturer" = "error" ] && {
 			manufacturer=""
 		}
+
 		# 如果成功获取制造商信息则退出循环
 		[ -n "$manufacturer" ] && {
 			break
 		}
+
 		# 如果未设置延迟则立即退出循环
 		[ -z "$delay" ] && {
 			break
@@ -185,7 +225,7 @@ proto_ncm_setup() {
 		}
 	done
 
-	logger -t "NCM" "manufacturer:${manufacturer}"
+	logger -t "NCM" "manufacturer:[${manufacturer}]"
 
 	# 如果未能获取制造商信息则报错退出
 	[ -z "$manufacturer" ] && {
@@ -198,15 +238,15 @@ proto_ncm_setup() {
 	# 加载NCM配置JSON文件
 	json_load "$(cat /etc/gcom/ncm.json)"
 	# 选择对应制造商的配置
-	json_select "$manufacturer"
-	# 如果找不到对应制造商配置则报错
-	[ $? -ne 0 ] && {
-		echo "Unsupported modem"
-		logger -t "NCM" "$FUNCNAME Unsupported modem"
-		proto_notify_error "$interface" UNSUPPORTED_MODEM
-		proto_set_available "$interface" 0
-		return 1
-	}
+	# json_select "$manufacturer"
+	# # 如果找不到对应制造商配置则报错
+	# [ $? -ne 0 ] && {
+	# 	echo "Unsupported modem"
+	# 	logger -t "NCM" "$FUNCNAME Unsupported modem"
+	# 	proto_notify_error "$interface" UNSUPPORTED_MODEM
+	# 	proto_set_available "$interface" 0
+	# 	return 1
+	# }
 
 	# 获取USB总线和端口号
 	local USB=$(get_usb_by_ttyUSB ${device})
@@ -232,8 +272,17 @@ proto_ncm_setup() {
 
 	# 获取模组名称
 	local module old_module
+	uci set sim.${uci_section}.module='' && uci commit sim
 	for i in 1 2 3; do
-		module=$(comgt -d ${device} -s /etc/gcom/getmodule.gcom)
+		module=$(rm -rf ${LOCK_FILE};echo -e 'AT+CGMM\r' | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		# logger -t "NCM" "module:[${module}]"
+		if echo ${module} | grep -q "OK"; then
+			module=$(echo ${module} | cut -d ' ' -f 1 | tr -d '\r\n')
+		else
+			module=
+		fi
+
+		logger -t "NCM" "module:[${module}]"
 		if [ ! -z "${module}" ]; then
 			old_module=$(uci get sim.${uci_section}.module)
 			[ "${old_module}" != "${module}" ] && { 
@@ -250,29 +299,28 @@ proto_ncm_setup() {
 
 	# 设置工作模式为NCM
 	for i in $(seq 1 3); do
-		mode=$(comgt -d ${device} -s /etc/gcom/getmode.gcom | tr -d '\r\n')
-		mode=$(echo ${mode} | grep -o '+QCFG:.*')
-		mode=$(echo ${mode} | grep -oE '[0-9]+')
+		mode=$(rm -rf ${LOCK_FILE};echo -e 'AT+QCFG="usbnet"\r' | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		mode=$(echo ${mode} | grep -o '+QCFG:.*' | sed 's/.*,\([0-9]\).*/\1/' | tr -d '\n')
 		[ "$mode" != "5" ] && {
-			# MODE=5 comgt -d /dev/ttyUSB2 -s /etc/gcom/setmode.gcom
-			ret=$(MODE=5 comgt -d ${device} -s /etc/gcom/setmode.gcom | tr -d '\r\n')
+			mode=5
+			ret=$(rm -rf ${LOCK_FILE};echo -e "AT+QCFG=\"usbnet\",${mode}\r" | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 			if echo "${ret}" | grep -q "OK"; then
-				logger -t "NCM" "set apn ${apn} succeed!"
+				logger -t "NCM" "set mode ${mode} ncm succeed!"
 				break
 			else
-				logger -t "NCM" "set apn ${apn} failed!"
+				logger -t "NCM" "set mode ${mode} ncm failed!"
 			fi
 		}
 	done
 
+	logger -t "NCM" "mode:[${mode}]"
 
 	# 获取模组版本号
 	local version old_version
+	uci set sim.${uci_section}.moduleVersion='' && uci commit sim
 	for i in 1 2 3; do
-		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getmoduleversion.gcom
-		version=$(comgt -d ${device} -s /etc/gcom/getmoduleversion.gcom | tr -d '\r')
-		version=$(echo "${version}" | awk -F 'Revision: ' '{print $2}' | awk '{gsub(/ *OK$/,""); print $0}')
-		version=$(echo "${version}" | xargs)
+		version=$(rm -rf ${LOCK_FILE};echo -e 'ATI\r' | microcom "$device" -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		version=$(echo ${version} | grep -o "Revision:."* | cut -d ' ' -f 2 | tr -d '\r\n')
 		[ ! -z ${version} ] && {
 			
 			# 保存到uci配置文件
@@ -292,10 +340,10 @@ proto_ncm_setup() {
 
 	# 获取模组IMEI码
 	local imei old_imei
+	uci set sim.${uci_section}.imei='' && uci commit sim
 	for i in 1 2 3; do
-		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getimei.gcom
-		imei=$(comgt -d ${device} -s /etc/gcom/getimei.gcom | tr -d '\r')
-		imei=$(echo ${imei} | sed 's/.*[^0-9]\([0-9]\{15\}\).*/\1/')
+		imei=$(rm -rf ${LOCK_FILE};echo -e 'AT+CGSN\r' | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		imei=$(echo ${imei} | tr -cd '0-9')
 		[ ! -z ${imei} ] && {
 			# 保存到uci配置文件
 			old_imei=$(uci get sim.${uci_section}.imei)
@@ -314,7 +362,9 @@ proto_ncm_setup() {
 	# 查询是否插卡
 	local simin
 	for i in $(seq 1 3); do
-		simin=$(comgt -d ${device} -s /etc/gcom/getsimin.gcom | tr -d '\r')
+		# echo -e 'AT+CPIN?\r' | microcom /dev/ttyUSB2 -t 100
+		simin=$(rm -rf ${LOCK_FILE};echo -e 'AT+CPIN?\r' | microcom "$device" -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		logger -t "NCM" "${simin}"
 		if echo "${simin}" | grep -q "READY"; then
 			break
 		fi		
@@ -328,10 +378,10 @@ proto_ncm_setup() {
 
 	# 查询IMSI
 	local imsi old_imsi
+	uci set sim.${uci_section}.imsi='' && uci commit sim
 	for i in $(seq 1 3); do
-		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getimsi.gcom
-		imsi=$(comgt -d ${device} -s /etc/gcom/getimsi.gcom | tr -d '\r')
-		imsi=$(echo ${imsi} | sed 's/.*[^0-9]\([0-9]\{15\}\).*/\1/')
+		imsi=$(rm -rf ${LOCK_FILE};echo -e 'AT+CIMI\r' | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+		imsi=$(echo ${imsi} | tr -cd '0-9')
 		[ ! -z ${imsi} ] && {
 			uci set sim.${uci_section}.imsi=${imsi} && uci commit sim
 			logger -t "NCM" "uci set sim.${uci_section}.imsi=${imsi} && uci commit sim"
@@ -343,13 +393,9 @@ proto_ncm_setup() {
 
 	# 查询运营商
 	local operator old_operator
+	uci set sim.${uci_section}.operator='' && uci commit sim
 	for i in $(seq 1 3); do
-		# comgt -d /dev/ttyUSB2 -s /etc/gcom/getoperator.gcom
-		# AT+QNWINFO
-		# +QNWINFO: "NR5G-SA",46011,"NR N78",627264
-		# OK
-		operator=$(comgt -d ${device} -s /etc/gcom/getoperator.gcom | tr -d '\r\n')
-		logger -t "NCM" "operator:${operator}"
+		operator=$(rm -rf ${LOCK_FILE};echo -e 'AT+QNWINFO\r' | microcom $device -t 100 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		operator=$(echo ${operator} | sed -n 's/.*+QNWINFO: "[^"]*",\([0-9]*\).*/\1/p')
 		logger -t "NCM" "operator:${operator}"
 		[ ! -z ${operator} ] && {
@@ -400,7 +446,7 @@ proto_ncm_setup() {
 		# NET=NR5G-SA comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
 		# NET=NR5G-NSA comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
 		# NET=LTE comgt -d /dev/ttyUSB2 -s /etc/gcom/setnet.gcom
-		ret=$(NET=${NET} comgt -d ${device} -s /etc/gcom/setnet.gcom | tr -d '\r')
+		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+QNWPREFCFG=\"mode_pref\",${NET}\r" | microcom $device -t 3000 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "set net ${net} succeed!"
 			break
@@ -414,7 +460,7 @@ proto_ncm_setup() {
 	logger -t "NCM" "uci sim apn:${apn}"
 	for i in $(seq 1 3); do
 		# APN=3gnet comgt -d /dev/ttyUSB2 -s /etc/gcom/setapn.gcom
-		ret=$(APN=${apn} comgt -d /dev/ttyUSB2 -s /etc/gcom/setapn.gcom | tr -d '\r\n')
+		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+CGDCONT=1,\"IP\",\"${apn}\"\r" | microcom $device -t 300 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "set apn ${apn} succeed!"
 			break
@@ -453,7 +499,7 @@ proto_ncm_setup() {
 
 	for i in $(seq 1 3); do
 		# APN=3gnet USER=user PASSWD=passwd AUTH=0 comgt -d /dev/ttyUSB2 -s /etc/gcom/setauth.gcom
-		ret=$(APN=${apn} USER=${username} PASSWD=${password} AUTH=${AUTH} comgt -d ${device} -s /etc/gcom/setauth.gcom | tr -d '\r\n')
+		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+QICSGP=1,1,\"${apn}\",\"${username}\",\"${password}\",${AUTH}\r" | microcom $device -t 2000 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "set auth apn:${apn} auth:${auth} user:${username} passwd:${password} succeed!"
 			break
@@ -465,7 +511,7 @@ proto_ncm_setup() {
 	# 拨号
 	for i in $(seq 1 3); do
 		# comgt -d /dev/ttyUSB2 -s /etc/gcom/dial.gcom
-		ret=$(comgt -d ${device} -s /etc/gcom/dial.gcom | tr -d '\r\n')
+		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+QNETDEVCTL=1,1,0\r" | microcom $device -t 1000 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "dial succeed!"
 			break
@@ -656,7 +702,5 @@ proto_ncm_teardown() {
 # 如果不是仅包含模式则注册NCM协议
 [ -n "$INCLUDE_ONLY" ] || {
 	logger -t "NCM" "add protocol ncm"
-
-	# 向系统注册NCM协议处理器
 	add_protocol ncm
 }
