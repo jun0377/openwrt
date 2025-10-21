@@ -39,6 +39,7 @@ stop_service() {
 	sleep 1
 }
 
+# ATM桥接网络接口的配置验证
 validate_atm_bridge_section()
 {
 	uci_validate_section network "atm-bridge" "${1}" \
@@ -50,6 +51,7 @@ validate_atm_bridge_section()
 		'payload:or("bridged", "routed"):bridged'
 }
 
+# 验证 OpenWrt IPv4 路由配置
 validate_route_section()
 {
 	uci_validate_section network route "${1}" \
@@ -62,6 +64,7 @@ validate_route_section()
 		'table:or(range(0,65535),string)'
 }
 
+# 验证 OpenWrt IPv6 路由配置
 validate_route6_section()
 {
 	uci_validate_section network route6 "${1}" \
@@ -73,6 +76,7 @@ validate_route6_section()
 		'table:or(range(0,65535),string)'
 }
 
+# 验证 OpenWrt IPv4 路由策略规则
 validate_rule_section()
 {
 	uci_validate_section network rule "${1}" \
@@ -88,6 +92,7 @@ validate_rule_section()
 		'action:or("prohibit", "unreachable", "blackhole", "throw")'
 }
 
+# 验证 OpenWrt IPv6 路由策略规则
 validate_rule6_section()
 {
 	uci_validate_section network rule6 "${1}" \
@@ -124,20 +129,21 @@ validate_switch_vlan()
 
 service_triggers()
 {
+	# /etc/config/network /etc/config/wireless 这两个配置文件发生变化时,自动触发此脚本
 	procd_add_reload_trigger network wireless
 
-	procd_open_validate
-	validate_atm_bridge_section
-	validate_route_section
-	[ -e /proc/sys/net/ipv6 ] && validate_route6_section
-	validate_rule_section
-	[ -e /proc/sys/net/ipv6 ] && validate_rule6_section
-	validate_switch_section
-	validate_switch_vlan
-	procd_close_validate
+	procd_open_validate											# 配置文件的合法性校验,打开一个新的验证上下文
+	validate_atm_bridge_section									# ATM桥接网络接口的配置验证 
+	validate_route_section										# IPv4 静态路由配置
+	[ -e /proc/sys/net/ipv6 ] && validate_route6_section		# IPv6 静态路由配置
+	validate_rule_section										# IPv4 策略路由配置
+	[ -e /proc/sys/net/ipv6 ] && validate_rule6_section			# IPv6 策略路由配置
+	validate_switch_section										# switch 配置
+	validate_switch_vlan										# vlan 配置
+	procd_close_validate										# 配置文件的合法性校验,关闭验证数组
 }
 
 shutdown() {
-	ifdown -a
+	ifdown -a													# 关闭所有网络接口
 	sleep 1
 }

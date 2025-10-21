@@ -3,6 +3,7 @@
 . /lib/netifd/hostapd.sh
 . /lib/functions/system.sh
 
+# 初始化 netifd 无线驱动脚本的通用框架，注册回调 drv_* 方法，启用 JSON、UCI 解析工具
 init_wireless_driver "$@"
 
 MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh_max_peer_links
@@ -15,14 +16,19 @@ MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh
 MP_CONFIG_BOOL="mesh_auto_open_plinks mesh_fwding"
 MP_CONFIG_STRING="mesh_power_mode"
 
+# 通过 ucode /usr/share/hostap/wdev.uc 调用无线设备辅助工具（wdev.uc），用于生成 MAC 地址、下发 per-phy 的 JSON 配置等
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
 }
 
+# 为 ubus call 加锁（ /var/run/hostapd.lock ），保证 hostapd/wpa_supplicant 并发下发配置时的进程安全，避免竞争条件
 ubus_call() {
 	flock /var/run/hostapd.lock ubus call "$@"
 }
 
+# 向 netifd 注册设备级（phy）可读写的 UCI/JSON 选项
+# 如 path/phy/macaddr_base/num_global_macaddr 、射频参数（ txpower/rxantenna/txantenna ）、信道列表、ht/vht/he 能力开关和数值等
+# 供 netifd 解析与下发
 drv_mac80211_init_device_config() {
 	hostapd_common_add_device_config
 
@@ -78,6 +84,9 @@ drv_mac80211_init_device_config() {
 		dsss_cck_40
 }
 
+# 注册接口级（每个 SSID/VIF）选项
+# 如 ifname/macaddr/wds/powersave/maxassoc/dtim_period/start_disabled ，以及 mesh 专用的参数集合（ MP_CONFIG_INT/BOOL/STRING ）
+# 配合后续 mac80211_setup_* 拼装
 drv_mac80211_init_iface_config() {
 	hostapd_common_add_bss_config
 
@@ -97,6 +106,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string $MP_CONFIG_STRING
 }
 
+# 按位掩码解析 HT/VHT 能力，匹配硬件支持与用户期望，输出形如 [LDPC][SHORT-GI-20]... 的能力串到变量 __var
 mac80211_add_capabilities() {
 	local __var="$1"; shift
 	local __mask="$1"; shift
@@ -116,6 +126,7 @@ mac80211_add_capabilities() {
 	export -n -- "$__var=$__out"
 }
 
+# 针对 802.11ax/HE 的能力位域，按硬件位图筛选功能，向 base_cfg 追加 he_* 能力项（例如 he_spr_sr_control ），同时将不支持的能力变量清零
 mac80211_add_he_capabilities() {
 	local __out= oifs
 
@@ -133,6 +144,7 @@ mac80211_add_he_capabilities() {
 	IFS="$oifs"
 }
 
+# 构造 hostapd 的设备/radio 基础配置
 mac80211_hostapd_setup_base() {
 	local phy="$1"
 
@@ -538,6 +550,7 @@ EOF
 	json_select ..
 }
 
+# 生成每个 BSS 接口的 hostapd 配置（AP 模式）
 mac80211_hostapd_setup_bss() {
 	local phy="$1"
 	local ifname="$2"
@@ -568,6 +581,7 @@ ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
 }
 
+# 从 /sys/class/ieee80211/${phy}/addresses 获取第 idx 个可用硬件地址，用于多 BSS/多接口 MAC 分配
 mac80211_get_addr() {
 	local phy="$1"
 	local idx="$(($2 + 1))"
@@ -575,6 +589,7 @@ mac80211_get_addr() {
 	head -n $idx /sys/class/ieee80211/${phy}/addresses | tail -n1
 }
 
+# 调用 wdev.uc 依据 num_global_macaddr/multiple_bssid/macaddr_base 生成下一可用 MAC，确保跨接口不冲突
 mac80211_generate_mac() {
 	local phy="$1"
 	local id="${macidx:-0}"
@@ -582,6 +597,7 @@ mac80211_generate_mac() {
 	wdev_tool "$phy$phy_suffix" get_macaddr id=$id num_global=$num_global_macaddr mbssid=${multiple_bssid:-0} macaddr_base=${macaddr_base}
 }
 
+# 从 /etc/board.json 中根据设备路径查找 wiphy 名称（或带后缀），用来做设备重命名的参考
 get_board_phy_name() (
 	local path="$1"
 	local fallback_phy=""
@@ -607,6 +623,7 @@ get_board_phy_name() (
 	[ -n "$fallback_phy" ] && echo "${fallback_phy}.${path##*+}"
 )
 
+# 从 /etc/board.json 中根据设备路径查找 wiphy 名称（或带后缀），用来做设备重命名的参考
 rename_board_phy_by_path() {
 	local path="$1"
 
@@ -616,6 +633,7 @@ rename_board_phy_by_path() {
 	iw "$phy" set name "$new_phy" && phy="$new_phy"
 }
 
+# 将内核中的 wiphy 名称与 board.json 对齐（改名），避免因序枚举导致的名字漂移，提高配置稳定性
 rename_board_phy_by_name() (
 	local phy="$1"
 	local suffix="${phy##*.}"
@@ -634,6 +652,7 @@ rename_board_phy_by_name() (
 	iw "$prev_phy" set name "$phy"
 )
 
+# 综合 phy/path/macaddr 三种来源定位实际存在的 wiphy；必要时触发重命名并返回匹配结果
 find_phy() {
 	[ -n "$phy" ] && {
 		rename_board_phy_by_name "$phy"
@@ -658,16 +677,19 @@ find_phy() {
 	return 1
 }
 
+# 标记本射频上存在 AP 接口（ has_ap=1 ），供后续决定是否生成 hostapd 基础段
 mac80211_check_ap() {
 	has_ap=1
 }
 
+# 根据类型（ap/sta/mesh/ibss/mon）与前缀，为当前 VIF 生成唯一接口名（如 phy0- 派生 ap0/sta0 等）
 mac80211_set_ifname() {
 	local prefix="$1"
 	local type="$2"
 	eval "ifname=\"$prefix$type\${idx_$type:-0}\"; idx_$type=\$((\${idx_$type:-0 } + 1))"
 }
 
+# 预处理每个 VIF
 mac80211_prepare_vif() {
 	json_select config
 
@@ -738,6 +760,7 @@ mac80211_prepare_vif() {
 	json_select ..
 }
 
+# 将 UCI htmode （如 HT40+/VHT80/HE20/NOHT ）转换为 iw 接口语法（如 HT40+/80MHZ/NOHT ），供 wpa_supplicant 与监控模式使用
 mac80211_prepare_iw_htmode() {
 	case "$htmode" in
 		VHT20|HT20|HE20) iw_htmode=HT20;;
@@ -775,6 +798,7 @@ mac80211_prepare_iw_htmode() {
 	esac
 }
 
+# 将 mesh 专用参数（MP_CONFIG_*）打入 JSON，供 wpa_supplicant 或 wdev 使用
 mac80211_add_mesh_params() {
 	for var in $MP_CONFIG_INT $MP_CONFIG_BOOL $MP_CONFIG_STRING; do
 		eval "mp_val=\"\$$var\""
@@ -782,6 +806,7 @@ mac80211_add_mesh_params() {
 	done
 }
 
+# 组装 IBSS（Adhoc）接口的 JSON，处理 WEP（ prepare_key_wep ）、基本速率与组播速率，写入 wdev_uc 命名空间
 mac80211_setup_adhoc() {
 	local enable=$1
 	json_get_vars bssid ssid key mcast_rate
@@ -842,6 +867,7 @@ mac80211_setup_adhoc() {
 	json_set_namespace "$prev"
 }
 
+# 组装 Mesh 接口的 JSON，处理 mesh_id 、基本速率/组播、Beacon 间隔与 mesh 参数集
 mac80211_setup_mesh() {
 	json_get_vars ssid mesh_id mcast_rate
 	json_get_values iface_basic_rate_list basic_rate
@@ -879,6 +905,7 @@ mac80211_setup_mesh() {
 	json_set_namespace "$prev"
 }
 
+# 组装 Monitor 接口 JSON，允许指定频点与带宽模式
 mac80211_setup_monitor() {
 	local prev
 	json_set_namespace wdev_uc prev
@@ -892,6 +919,7 @@ mac80211_setup_monitor() {
 	json_set_namespace "$prev"
 }
 
+# 读取接口配置中的 vif_txpower ，通过 iw dev $ifname set txpower fixed/auto 设置每接口发射功率；缺省继承设备级 txpower
 mac80211_set_vif_txpower() {
 	local name="$1"
 
@@ -908,6 +936,7 @@ mac80211_set_vif_txpower() {
 	fi
 }
 
+# 初始化 wpa_supplicant 配置 JSON 数组（命名空间 wpa_supp ），供后续追加多个接口/网
 wpa_supplicant_init_config() {
 	json_set_namespace wpa_supp prev
 
@@ -917,6 +946,7 @@ wpa_supplicant_init_config() {
 	json_set_namespace "$prev"
 }
 
+# 向 wpa_supplicant 配置数组追加一项：控制路径、接口名、工作模式、配置文件路径，以及 4addr/WDS、桥接、powersave、mesh 参数等；标记已初始化
 wpa_supplicant_add_interface() {
 	local ifname="$1"
 	local mode="$2"
@@ -943,6 +973,8 @@ wpa_supplicant_add_interface() {
 	wpa_supp_init=1
 }
 
+# 封闭 JSON 数组、追加 radio/phy/地址基座等
+# 然后通过 ubus call wpa_supplicant config_set "$data" 下发配置；返回 PID 后登记进程（ wireless_add_process ）
 wpa_supplicant_set_config() {
 	local phy="$1"
 	local radio="$2"
@@ -974,9 +1006,14 @@ wpa_supplicant_set_config() {
 
 }
 
+# Hostapd 下发配置与进程登记
+## 若 hostapd_ctrl 未就绪，先以空配置初始化控制面，返回
+## 否则等待 hostapd 服务，调用 ubus_call hostapd config_set {phy,radio,config,prev_config} 下发配置文件路径；返回 PID 后登记 hostapd 进程；失败则报 HOSTAPD_START_FAILED
 hostapd_set_config() {
 	local phy="$1"
 	local radio="$2"
+
+	logger -t "wifi" "$FUNCNAME phy=${phy} radio=${radio}"	
 
 	[ -n "$hostapd_ctrl" ] || {
 		ubus_call hostapd config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "config": "", "prev_config": "'"${hostapd_conf_file}.prev"'" }' > /dev/null
@@ -993,7 +1030,8 @@ hostapd_set_config() {
 	wireless_add_process "$(jsonfilter -s "$hostapd_res" -l 1 -e @.pid)" "/usr/sbin/hostapd" 1 1
 }
 
-
+# WPA Supplicant 启动触发
+## 在已初始化情况下，向 wpa_supplicant 再次下发全局参数（macaddr_base/num_global_macaddr），实际由其内部决定进程启动或重载
 wpa_supplicant_start() {
 	local phy="$1"
 	local radio="$2"
@@ -1003,6 +1041,7 @@ wpa_supplicant_start() {
 	ubus_call wpa_supplicant config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "num_global_macaddr": '"$num_global_macaddr"', "macaddr_base": "'"$macaddr_base"'" }' > /dev/null
 }
 
+# 为 sta/adhoc/mesh 准备 wpa_supplicant
 mac80211_setup_supplicant() {
 	local enable=$1
 	local add_sp=0
@@ -1020,6 +1059,11 @@ mac80211_setup_supplicant() {
 	return 0
 }
 
+# 读取 _ifname/_macaddr/_default_macaddr 与 mode / wds / powersave ，按模式分支：
+## mesh ：支持 wpa_supplicant mesh（如可用）、否则走 mac80211_setup_mesh ；
+## adhoc ：有 wpa>0 或自动选频时走 supplicant，否则走 setup_adhoc ；
+## sta ：走 supplicant；
+## monitor ：走 setup_monitor
 mac80211_setup_vif() {
 	local name="$1"
 	local failed
@@ -1064,6 +1108,8 @@ mac80211_setup_vif() {
 	[ -n "$failed" ] || wireless_add_vif "$name" "$ifname"
 }
 
+# 频率与 DFS 检测辅助
+## 从 iw phy info 的 Band 段解析指定信道的中心频率（MHz），用于 auto_channel=0 时转换信道到频率
 get_freq() {
 	local phy="$1"
 	local channel="$2"
@@ -1089,6 +1135,7 @@ band_match && $3 == "MHz" && $4 == channel {
 '
 }
 
+# 检查该信道是否标注“radar detection”，判断 DFS 信道属性（布尔），供动态避雷达与限制使用
 chan_is_dfs() {
 	local phy="$1"
 	local chan="$2"
@@ -1096,14 +1143,20 @@ chan_is_dfs() {
 	return $!
 }
 
+# 设置 hostapd_noscan=1 ，表示在后续配置中禁止 hostapd 扫描，常用于非 AP 接口或需要固定频点场景
 mac80211_set_noscan() {
 	hostapd_noscan=1
 }
 
+# 清理钩子占位（当前为空），符合 netifd 驱动接口规范
 drv_mac80211_cleanup() {
 	:
 }
 
+# 复位当前 phy 的 hostapd/wpa_supplicant 状态：
+## 对 hostapd：下发空 config 与 prev_config ；
+## 对 wpa_supplicant：清空 config 数组；
+## 对 wdev：下发空 JSON；
 mac80211_reset_config() {
 	hostapd_conf_file="/var/run/hostapd-$phy$vif_phy_suffix.conf"
 	ubus_call hostapd config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "config": "", "prev_config": "'"$hostapd_conf_file"'" }' > /dev/null
@@ -1111,6 +1164,7 @@ mac80211_reset_config() {
 	wdev_tool "$phy$phy_suffix" set_config '{}'
 }
 
+# 计算 phy_suffix/vif_phy_suffix 与 radio 缺省，统一生成文件名与接口名后缀（如 phy0:1 → .1 ），简化多 radio 实例管理
 mac80211_set_suffix() {
 	[ "$radio" = "-1" ] && radio=
 	phy_suffix="${radio:+:$radio}"
@@ -1118,7 +1172,23 @@ mac80211_set_suffix() {
 	set_default radio -1
 }
 
+# 核心入口，完成整个无线设备的配置与进程启动
+## 解析设备级配置与基本速率/扫描列表；
+## mac80211_set_suffix 、读取前次天线配置以决定是否 mac80211_reset_config ；
+## 寻找并可能重命名匹配的 phy ；
+## 设置国家码、射频功率/天线掩码、距离、分片/RTS；
+## 标记 AP 存在、准备 hostapd 控制面；若有 AP 则生成设备级配置 mac80211_hostapd_setup_base ；
+## 初始化 wdev JSON 命名空间与 wpa_supplicant 配置数组；
+## 准备 iw htmode → iw_htmode ；
+## 遍历所有接口：先 mac80211_prepare_vif 再 mac80211_setup_vif ；
+## 下发 wpa_supplicant 配置并登记进程；下发 hostapd 配置并登记进程；如需则触发 wpa_supplicant 启动；
+## 将生成的 wdev JSON 下发到 wdev_tool set_config （含 active_ifnames ）；
+## 对无后缀的 PHY 设置设备级 txpower ；
+## 设置每接口的 vif_txpower ；最后 wireless_set_up 通知 netifd 完成设备启用
 drv_mac80211_setup() {
+
+	logger -t "wifi" "$FUNCNAME"
+
 	json_select config
 	json_get_vars \
 		radio phy macaddr path \
@@ -1234,6 +1304,7 @@ drv_mac80211_setup() {
 	wireless_set_up
 }
 
+# 列出挂在该 PHY 上所有 net 接口名（两种不同的 sysfs 路径兼容），用于工具/调试或清理
 _list_phy_interfaces() {
 	local phy="$1"
 	if [ -d "/sys/class/ieee80211/${phy}/device/net" ]; then
@@ -1252,6 +1323,9 @@ list_phy_interfaces() {
 	done
 }
 
+# 拆除设备：
+## 读取 phy/radio ，执行 mac80211_set_suffix 
+## 调用 mac80211_reset_config 清空 hostapd/wpa_supplicant/wdev 状态，满足 netifd 的 teardown 生命周期
 drv_mac80211_teardown() {
 	json_select data
 	json_get_vars phy radio
@@ -1265,4 +1339,5 @@ drv_mac80211_teardown() {
 	mac80211_reset_config "$phy"
 }
 
+# 将 mac80211 驱动脚本注册到 netifd 框架，绑定上述 init/setup/cleanup/teardown 回调
 add_driver mac80211

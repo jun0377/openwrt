@@ -12,15 +12,19 @@ EOF
 	exit 1
 }
 
+# 向ubus发送wifi相关命令
 ubus_wifi_cmd() {
 	local cmd="$1"
 	local dev="$2"
 
 	json_init
 	[ -n "$dev" ] && json_add_string device "$dev"
+
+	logger -t "wifi" "$FUNCNAME ubus call network.wireless ${cmd} $(json_dump)" 
 	ubus call network.wireless "$cmd" "$(json_dump)"
 }
 
+# wifi是否处于up状态
 wifi_isup() {
 	local dev="$1"
 
@@ -30,43 +34,73 @@ wifi_isup() {
 	for device in $devices; do
 		json_select "$device"
 			json_get_var up up
-			[ $up -eq 0 ] && return 1
+			[ $up -eq 0 ] && logger -t "wifi" "$FUNCNAME ${device} is up" && return 1
 		json_select ..
 	done
 
+	logger -t "wifi" "$FUNCNAME ${device} is down"
 	return 0
 }
 
+# 启停wifi
 wifi_updown() {
+
+	logger -t "wifi" "$FUNCNAME $1 $2"
+
 	cmd=down
+	
+	# wifi_updown enable xxx; 关闭wifi -> reload配置文件 -> 开启wifi
 	[ enable = "$1" ] && {
+		# 关闭wifi
 		ubus_wifi_cmd "$cmd" "$2"
+		logger -t "wifi" "$FUNCNAME ubus_wifi_cmd ${cmd} $2"
+
+		# reload配置文件
 		ubus call network reload
+		logger -t "wifi" "$FUNCNAME ubus call network reload"
 		cmd=up
 	}
+
+	# reload配置文件
 	[ reconf = "$1" ] && {
 		ubus call network reload
+		logger -t "wifi" "$FUNCNAME ubus call network reload"
 		cmd=reconf
 	}
+
+	# 开启wifi
 	ubus_wifi_cmd "$cmd" "$2"
+	logger -t "wifi" "$FUNCNAME ubus_wifi_cmd ${cmd} $2"
 }
 
+# 重新加载wifi配置文件
 wifi_reload() {
 	ubus call network reload
+	logger -t "wifi" "$FUNCNAME ubus call network reload"
 }
 
+# 输出警告信息
 wifi_detect_notice() {
+	logger -t "wifi" "$FUNCNAME WARNING: Wifi detect is deprecated. Use wifi config instead"
+	logger -t "wifi" "$FUNCNAME For more information, see commit 5f8f8a366136a07df661e31decce2458357c167a"
+
 	>&2 echo "WARNING: Wifi detect is deprecated. Use wifi config instead"
 	>&2 echo "For more information, see commit 5f8f8a366136a07df661e31decce2458357c167a"
 	exit 1
 }
 
 wifi_config() {
+
+	# 检查是否有未提交的更改
 	[ -e /tmp/.config_pending ] && return
+	# wifi能力检测,将wifi的硬件信息写入到/etc/board.json中
 	ucode /usr/share/hostap/wifi-detect.uc
+	# 初始化配置文件
 	[ ! -f /etc/config/wireless ] && touch /etc/config/wireless
+	# 更新配置文件
 	ucode /lib/wifi/mac80211.uc | uci -q batch
 
+	# 遍历检测所有驱动, 如: ath9k  rtl8192 ...
 	for driver in $DRIVERS; do (
 		if eval "type detect_$driver" 2>/dev/null >/dev/null; then
 			eval "detect_$driver" || echo "$driver: Detect failed" >&2

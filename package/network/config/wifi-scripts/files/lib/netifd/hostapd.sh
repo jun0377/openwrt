@@ -1,6 +1,10 @@
 . /lib/functions/network.sh
 . /lib/functions.sh
 
+## 生成hostapd配置文件和辅助文件
+
+
+# 速率格式化, 将速率（kbps）转换为 wpa_supplicant 期望的字符串格式（如 5.5、11），并追加到变量 var ，以逗号分隔
 wpa_supplicant_add_rate() {
 	local var="$1"
 	local val="$(($2 / 1000))"
@@ -9,12 +13,14 @@ wpa_supplicant_add_rate() {
 	[ $sub -gt 0 ] && append $var "."
 }
 
+# 将速率（kbps）转换为 hostapd 期望的单位（100 kbps 为单位的整数，如 6000 → 60），并以空格分隔追加到变量 var
 hostapd_add_rate() {
 	local var="$1"
 	local val="$(($2 / 100))"
 	append $var "$val" " "
 }
 
+# 根据 key / key1..key4 从 UCI/JSON 获取 WEP 密钥，格式化为 wep_keyX=... 并写入变量 var ；同时设定默认密钥索引 wep_keyidx
 hostapd_append_wep_key() {
 	local var="$1"
 
@@ -37,6 +43,8 @@ hostapd_append_wep_key() {
 	esac
 }
 
+# 根据解析出的认证类型 auth_type （如 psk 、 sae 、 eap 、 eap192 、 owe 等）、 wpa 版本、 ieee80211r （FT）、 ieee80211w （MFP/PMF）以及 fils
+# 组合生成 wpa_key_mgmt 支持列表（如 WPA-PSK 、 FT-PSK 、 SAE 、 FILS-SHA256 等）
 hostapd_append_wpa_key_mgmt() {
 	local auth_type_l="$(echo $auth_type | tr 'a-z' 'A-Z')"
 
@@ -91,6 +99,7 @@ hostapd_append_wpa_key_mgmt() {
 	[ "$auth_osen" = "1" ] && append wpa_key_mgmt "OSEN"
 }
 
+# 声明 hostapd 设备级可用的日志相关 UCI 选项（如 log_80211 、 log_wpa 、 log_driver 、 log_level 等）
 hostapd_add_log_config() {
 	config_add_boolean \
 		log_80211 \
@@ -104,6 +113,8 @@ hostapd_add_log_config() {
 	config_add_int log_level
 }
 
+# 注册设备级（radio/phy）UCI 选项，使 netifd 能识别并传入 JSON
+# 如 basic_rate 、 supported_rates 、 beacon_rate 、 country 、 require_mode （n/ac）、 legacy_rates 、 cell_density 、 rts_threshold 、 rssi_* 、 acs_chan_bias 、 hostapd_options （自由追加项）、 airtime_mode 、 mbssid 、 stationary_ap 等
 hostapd_common_add_device_config() {
 	config_add_array basic_rate
 	config_add_array supported_rates
@@ -132,6 +143,7 @@ hostapd_common_add_device_config() {
 	hostapd_add_log_config
 }
 
+# 读取设备级 JSON/UCI 变量，设置默认值，综合生成 hostapd 的全局/设备级配置文本
 hostapd_prepare_device_config() {
 	local config="$1"
 	local driver="$2"
@@ -263,6 +275,7 @@ $base_cfg
 EOF
 }
 
+# 注册 BSS 级（每个 wifi-iface /SSID）可用的 UCI 选项，包含非常丰富的功能
 hostapd_common_add_bss_config() {
 	config_add_string 'bssid:macaddr' 'ssid:string'
 	config_add_boolean wds wmm uapsd hidden utf8_ssid ppsk
@@ -398,6 +411,7 @@ hostapd_common_add_bss_config() {
 	config_add_string apup_peer_ifname_prefix
 }
 
+# 从某个 VLAN 配置段读取 name 、 vid ，在 /var/run/hostapd-<ifname>.vlan 中写入一行 <vid> <ifname>-<name> ，并调用 wireless_add_vlan 注册 VLAN 接口
 hostapd_set_vlan_file() {
 	local ifname="$1"
 	local vlan="$2"
@@ -406,6 +420,7 @@ hostapd_set_vlan_file() {
 	wireless_add_vlan "${vlan}" "${ifname}-${name}"
 }
 
+# 清理并重建 /var/run/hostapd-<ifname>.vlan 文件，遍历所有 VLAN 段写入映射
 hostapd_set_vlan() {
 	local ifname="$1"
 
@@ -413,6 +428,7 @@ hostapd_set_vlan() {
 	for_each_vlan hostapd_set_vlan_file ${ifname}
 }
 
+# 在 auth_type 为 psk 或 psk-sae 时，遍历所有“station”段，批量生成 .psk 文件
 hostapd_set_psk_file() {
 	local ifname="$1"
 	local vlan="$2"
@@ -424,6 +440,7 @@ hostapd_set_psk_file() {
 	echo "${vlan_id} ${mac} ${key}" >> /var/run/hostapd-${ifname}.psk
 }
 
+# 在 auth_type 为 psk 或 psk-sae 时，遍历所有“station”段，批量生成 .psk 文件
 hostapd_set_psk() {
 	local ifname="$1"
 
@@ -435,6 +452,7 @@ hostapd_set_psk() {
 	for_each_station hostapd_set_psk_file ${ifname}
 }
 
+# 在 auth_type 为 sae 或 psk-sae 时，遍历所有“station”段，批量生成 .sae 文件
 hostapd_set_sae_file() {
 	local ifname="$1"
 	local vlan="$2"
@@ -447,6 +465,7 @@ hostapd_set_sae_file() {
 	printf '%s%s%s\n' "${key}" "${mac}" "${vlan_id}" >> /var/run/hostapd-${ifname}.sae
 }
 
+# 在 auth_type 为 sae 或 psk-sae 时，遍历所有“station”段，批量生成 .sae 文件
 hostapd_set_sae() {
 	local ifname="$1"
 
@@ -458,10 +477,12 @@ hostapd_set_sae() {
 	for_each_station hostapd_set_sae_file ${ifname}
 }
 
+# 向 bss_conf 追加 roaming_consortium=<val>
 append_iw_roaming_consortium() {
 	[ -n "$1" ] && append bss_conf "roaming_consortium=$1" "$N"
 }
 
+# 累计 Interworking 域名列表，逗号分隔，最后写入 bss_conf
 append_iw_domain_name() {
 	if [ -z "$iw_domain_name_conf" ]; then
 		iw_domain_name_conf="$1"
@@ -470,6 +491,7 @@ append_iw_domain_name() {
 	fi
 }
 
+# 累计 ANQP 3GPP 小区网络标识列表，分号分隔，最后写入 bss_conf
 append_iw_anqp_3gpp_cell_net() {
 	if [ -z "$iw_anqp_3gpp_cell_net_conf" ]; then
 		iw_anqp_3gpp_cell_net_conf="$1"
@@ -478,34 +500,42 @@ append_iw_anqp_3gpp_cell_net() {
 	fi
 }
 
+# 追加 anqp_elem 行
 append_iw_anqp_elem() {
 	[ -n "$1" ] && append bss_conf "anqp_elem=$1" "$N"
 }
 
+# 追加 nai_realm 行
 append_iw_nai_realm() {
 	[ -n "$1" ] && append bss_conf "nai_realm=$1" "$N"
 }
 
+# 追加 venue_name 行
 append_iw_venue_name() {
 	append bss_conf "venue_name=$1" "$N"
 }
 
+# 追加 venue_url 行
 append_iw_venue_url() {
 	append bss_conf "venue_url=$1" "$N"
 }
 
+# 追加 hs20_oper_friendly_name 行
 append_hs20_oper_friendly_name() {
 	append bss_conf "hs20_oper_friendly_name=$1" "$N"
 }
 
+# 追加 osu_friendly_name 行
 append_osu_provider_friendly_name() {
 	append bss_conf "osu_friendly_name=$1" "$N"
 }
 
+# 追加 osu_service_desc 行
 append_osu_provider_service_desc() {
 	append bss_conf "osu_service_desc=$1" "$N"
 }
 
+# 从 hs20-icon 段读取 width 、 height 、 lang 、 type 、 path ，组合写入 hs20_icon=<width>:<height>:<lang>:<type>:<name>:<path>
 append_hs20_icon() {
 	local width height lang type path
 	config_get width "$1" width
@@ -517,19 +547,24 @@ append_hs20_icon() {
 	append bss_conf "hs20_icon=$width:$height:$lang:$type:$1:$path" "$N"
 }
 
+# 加载 wireless 配置，遍历所有 hs20-icon 段，批量追加图标条目
 append_hs20_icons() {
 	config_load wireless
 	config_foreach append_hs20_icon hs20-icon
 }
 
+# 追加 operator_icon 配置
 append_operator_icon() {
 	append bss_conf "operator_icon=$1" "$N"
 }
 
+# 追加 osu_icon 配置
 append_osu_icon() {
 	append bss_conf "osu_icon=$1" "$N"
 }
 
+# 加载 wireless 配置并定位 osu-provider 段
+# 写入该提供商的 URI、NAI、方法列表，以及其服务描述、友好名、图标等；自动插入注释 # provider <name> 以区隔
 append_osu_provider() {
 	local cfgtype osu_server_uri osu_friendly_name osu_nai osu_nai2 osu_method_list
 
@@ -555,22 +590,27 @@ append_osu_provider() {
 	append bss_conf "$N"
 }
 
+# 追加 HS2.0 连接能力 hs20_conn_capab=<val>
 append_hs20_conn_capab() {
 	[ -n "$1" ] && append bss_conf "hs20_conn_capab=$1" "$N"
 }
 
+# 追加 radius_acct_req_attr 属性
 append_radius_acct_req_attr() {
 	[ -n "$1" ] && append bss_conf "radius_acct_req_attr=$1" "$N"
 }
 
+# 追加 radius_auth_req_attr 属性
 append_radius_auth_req_attr() {
 	[ -n "$1" ] && append bss_conf "radius_auth_req_attr=$1" "$N"
 }
 
+# 追加 airtime_sta_weight 属性
 append_airtime_sta_weight() {
 	[ -n "$1" ] && append bss_conf "airtime_sta_weight=$1" "$N"
 }
 
+# 追加 auth_server_addr  auth_server_port  auth_server_shared_secret属性
 append_auth_server() {
 	[ -n "$1" ] || return
 	append bss_conf "auth_server_addr=$1" "$N"
@@ -578,6 +618,7 @@ append_auth_server() {
 	[ -n "$auth_secret" ] && append bss_conf "auth_server_shared_secret=$auth_secret" "$N"
 }
 
+# 追加 acct_server_addr  acct_server_port  acct_server_shared_secret属性
 append_acct_server() {
 	[ -n "$1" ] || return
 	append bss_conf "acct_server_addr=$1" "$N"
@@ -585,6 +626,7 @@ append_acct_server() {
 	[ -n "$acct_secret" ] && append bss_conf "acct_server_shared_secret=$acct_secret" "$N"
 }
 
+# 构造完整的 hostapd 接口配置文本并放入变量 var （通常名为 bss_conf ），供后续写入 hostapd.conf
 hostapd_set_bss_options() {
 	local var="$1"
 	local phy="$2"
@@ -1230,6 +1272,7 @@ hostapd_set_bss_options() {
 	return 0
 }
 
+# 把设备级日志相关的 JSON/UCI 选项（ log_* 、 log_level ）转换为 hostapd 的日志配置项
 hostapd_set_log_options() {
 	local var="$1"
 
@@ -1263,6 +1306,7 @@ hostapd_set_log_options() {
 	return 0
 }
 
+# 为后续函数设置内部变量 _rpath 和 _config
 _wpa_supplicant_common() {
 	local ifname="$1"
 
@@ -1270,11 +1314,13 @@ _wpa_supplicant_common() {
 	_config="${_rpath}-$ifname.conf"
 }
 
+# 清理指定接口的 wpa_supplicant 运行目录和配置文件
 wpa_supplicant_teardown_interface() {
 	_wpa_supplicant_common "$1"
 	rm -rf "$_rpath/$1" "$_config"
 }
 
+# 根据 JSON/UCI 参数生成接口的基础 wpa_supplicant 配置头（与后续网络块分离），并做模式与桥接合法性检查
 wpa_supplicant_prepare_interface() {
 	local ifname="$1"
 	_w_driver="$2"
@@ -1328,6 +1374,7 @@ EOF
 	return 0
 }
 
+# 在加入网络块时，强制设定运行频点、HT/VHT/HE 宽带能力
 wpa_supplicant_set_fixed_freq() {
 	local freq="$1"
 	local htmode="$2"
@@ -1350,6 +1397,7 @@ wpa_supplicant_set_fixed_freq() {
 	esac
 }
 
+# 根据接口、认证方式与工作模式，在 _config 中追加一个完整的 network={...} 块（或 WPS 特例）
 wpa_supplicant_add_network() {
 	local ifname="$1"
 	local freq="$2"
