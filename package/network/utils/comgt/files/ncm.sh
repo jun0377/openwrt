@@ -525,8 +525,8 @@ proto_ncm_setup() {
 		return 1
 	fi
 
-	# 拨号流程执行完毕, 开始创建更新状态的进程
-	/usr/local/bin/sim_status.sh ${interface} ${device} ${uci_section}
+	# 拨号流程执行完毕, 创建更新状态的进程
+	/usr/local/bin/sim_status.sh ${interface} ${device} ${uci_section} &
 
 	# 设置网络接口
 	echo "Setting up $ifname"
@@ -546,7 +546,9 @@ proto_ncm_setup() {
 	local zone="$(fw3 -q network "$interface" 2>/dev/null)"
 
 	# 如果PDP类型支持IPv4则创建IPv4接口
+	logger -t "NCM" "pdptype=${pdptype}!"
 	[ "$pdptype" = "IP" -o "$pdptype" = "IPV4V6" ] && {
+
 		# 初始化JSON
 		json_init
 		# 添加IPv4接口名称
