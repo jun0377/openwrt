@@ -457,8 +457,8 @@ proto_ncm_setup() {
 	# 设置APN
 	apn=$(uci get sim.${uci_section}.apn)
 	logger -t "NCM" "uci sim apn:${apn}"
-	for i in $(seq 1 3); do
-		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+CGDCONT=1,\"IP\",\"${apn}\"\r" | microcom $device -t 300 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
+	for i in $(seq 1 5); do
+		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+CGDCONT=1,\"IP\",\"${apn}\"\r" | microcom $device -t 500 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "set apn ${apn} succeed!"
 			break
@@ -507,7 +507,7 @@ proto_ncm_setup() {
 	done
 
 	# 拨号
-	for i in $(seq 1 3); do
+	for i in $(seq 1 5); do
 		ret=$(rm -rf ${LOCK_FILE};echo -e "AT+QNETDEVCTL=1,1,0\r" | microcom $device -t 1000 | tr '\r' ' ' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/ $//' | sed 's/^ //')
 		if echo "${ret}" | grep -q "OK"; then
 			logger -t "NCM" "dial succeed!"
