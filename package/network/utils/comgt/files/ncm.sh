@@ -16,9 +16,9 @@ function get_usb_by_ttyUSB()
 function get_simindex_by_usb()
 {
     local USB=$1
-    [ "${USB}" == "2-1:1.4" ] && echo "SIM_5G_1" && return
-    [ "${USB}" == "2-2:1.4" ] && echo "SIM_5G_2" && return
-    [ "${USB}" == "2-3:1.4" ] && echo "SIM_5G_3" && return
+    [ "${USB}" == "2-2:1.4" ] && echo "SIM_5G_1" && return
+    [ "${USB}" == "2-3:1.4" ] && echo "SIM_5G_2" && return
+    [ "${USB}" == "2-1:1.4" ] && echo "SIM_5G_3" && return
 }
 
 
@@ -526,7 +526,8 @@ proto_ncm_setup() {
 	fi
 
 	# 拨号流程执行完毕, 创建更新状态的进程
-	/usr/local/bin/sim_status.sh ${interface} ${device} ${uci_section} &
+	chmod a+x /usr/local/bin/sim_status.sh && /usr/local/bin/sim_status.sh ${interface} ${device} ${uci_section} &
+	logger -t "NCM" "/usr/local/bin/sim_status.sh ${interface} ${device} ${uci_section}"
 
 	# 设置网络接口
 	echo "Setting up $ifname"
