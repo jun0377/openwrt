@@ -1,83 +1,114 @@
 #!/bin/sh
 # Copyright (C) 2006-2012 OpenWrt.org
 
+# 加载 OpenWRT 核心函数库（包含常用的配置解析、路径处理等函数）
 . $IPKG_INSTROOT/lib/functions.sh
+# 加载 OpenWRT 服务管理专用函数库（包含 procd 相关、服务状态检查等）
 . $IPKG_INSTROOT/lib/functions/service.sh
 
+# $1 = 具体服务的初始化脚本路径（如 /etc/init.d/dnsmasq）
 initscript=$1
+# $2 = 要执行的操作（默认help，如 start/stop/enable）
 action=${2:-help}
+
+# 偏移参数，将后续参数留给具体操作使用
 shift 2
 
+# -------------------------- 基础服务操作函数 --------------------------
+# 启动服务（默认空实现，由具体服务脚本重写）
 start() {
 	return 0
 }
 
+# 停止服务（默认空实现，由具体服务脚本重写）
 stop() {
 	return 0
 }
 
+# 重载配置（默认调用重启，若服务实现了reload则覆盖）
 reload() {
 	restart
 }
 
+# 重启服务：先停止再启动，屏蔽TERM信号防止停止时被中断
 restart() {
-	trap '' TERM
-	stop "$@"
-	trap - TERM
-	start "$@"
+	trap '' TERM				# 屏蔽 TERM 信号（避免停止过程被杀死）
+	stop "$@"					# 执行停止操作，传递所有入参
+	trap - TERM					# 恢复 TERM 信号
+	start "$@"					# 执行启动操作，传递所有入参
 }
 
+# 开机启动阶段执行（默认调用start，适配 OpenWRT 启动流程）
 boot() {
 	start "$@"
 }
 
+# 关机阶段执行（默认调用stop，适配 OpenWRT 关机流程）
 shutdown() {
 	stop
 }
 
+# -------------------------- 开机自启管理函数 --------------------------
+# 禁用服务开机自启：删除 rc.d 中的启动/停止软链接
 disable() {
-	name="$(basename "${initscript}")"
-	rm -f "$IPKG_INSTROOT"/etc/rc.d/S??$name
-	rm -f "$IPKG_INSTROOT"/etc/rc.d/K??$name
+	name="$(basename "${initscript}")"			# 获取服务名（如从 /etc/init.d/dnsmasq 提取 dnsmasq）
+	rm -f "$IPKG_INSTROOT"/etc/rc.d/S??$name	# 删除开机启动软链接（S??开头，??是启动优先级，如 S95dnsmasq）
+	rm -f "$IPKG_INSTROOT"/etc/rc.d/K??$name	# 删除关机停止软链接（K??开头，??是停止优先级，如 K05dnsmasq）
 }
 
+# 启用服务开机自启：创建 rc.d 中的启动/停止软链接
 enable() {
 	err=1
 	name="$(basename "${initscript}")"
+
+	# 若定义了START优先级，则创建启动软链接（如 S95dnsmasq）
 	[ "$START" ] && \
 		ln -sf "../init.d/$name" "$IPKG_INSTROOT/etc/rc.d/S${START}${name##S[0-9][0-9]}" && \
 		err=0
+
+	# 若定义了STOP优先级，则创建停止软链接（如 K05dnsmasq）
 	[ "$STOP" ] && \
 		ln -sf "../init.d/$name" "$IPKG_INSTROOT/etc/rc.d/K${STOP}${name##K[0-9][0-9]}" && \
 		err=0
 	return $err
 }
 
+# 检查服务是否开机自启：判断 rc.d 中是否存在对应软链接
 enabled() {
-	name="$(basename "${initscript}")"
+	name="$(basename "${initscript}")"		# 提取纯服务名（去除可能的 SKxx 前缀）
 	name="${name##[SK][0-9][0-9]}"
-	{
+
+	{	
+		# 条件1：无START优先级 或 启动软链接存在
 		[ -z "${START:-}" ] || [ -L "$IPKG_INSTROOT/etc/rc.d/S${START}$name" ]
 	} && {
+		# 条件2：无STOP优先级 或 停止软链接存在
 		[ -z "${STOP:-}" ] || [ -L "$IPKG_INSTROOT/etc/rc.d/K${STOP}$name" ]
 	}
 }
 
+# 服务依赖检查（默认空实现，由具体服务脚本重写）
 depends() {
 	return 0
 }
 
+# -------------------------- 帮助信息管理函数 --------------------------
+# 初始化帮助信息和命令列表
 ALL_HELP=""
 ALL_COMMANDS="boot shutdown depends"
-extra_command() {
-	local cmd="$1"
-	local help="$2"
 
+# 注册额外命令（用于扩展自定义操作，如 running/status）
+extra_command() {
+	local cmd="$1"				# 额外命令名（如 running）
+	local help="$2"				# 命令帮助说明
+
+	# 格式化命令+帮助（左对齐16字符，适配终端显示）
 	local extra="$(printf "%-16s%s" "${cmd}" "${help}")"
-	ALL_HELP="${ALL_HELP}\t${extra}\n"
-	ALL_COMMANDS="${ALL_COMMANDS} ${cmd}"
+	ALL_HELP="${ALL_HELP}\t${extra}\n"			# 追加到总帮助信息
+	ALL_COMMANDS="${ALL_COMMANDS} ${cmd}"		# 追加到总命令列表
 }
 
+# 显示帮助信息：输出脚本用法和所有可用命令
 help() {
 	cat <<EOF
 Syntax: $initscript [command]
@@ -88,26 +119,33 @@ EOF
 }
 
 # for procd
+# -------------------------- Procd 扩展函数（OpenWRT 进程管理） --------------------------
+# Procd 启动服务（默认空实现，由具体服务脚本重写）
 start_service() {
 	return 0
 }
 
+# Procd 停止服务（默认空实现，由具体服务脚本重写）
 stop_service() {
 	return 0
 }
 
+# Procd 服务触发规则（默认空实现，由具体服务脚本重写）
 service_triggers() {
 	return 0
 }
 
+# 检查服务是否运行（基于 procd 进程管理）
 service_running() {
-	local instance="${1:-*}"
+	local instance="${1:-*}"								# 服务实例名（默认所有实例）
 
-	procd_running "$(basename $initscript)" "$instance"
+	procd_running "$(basename $initscript)" "$instance"		# 调用 procd 工具检查服务是否运行
 }
 
+# 开启调试追踪（若定义了 INIT_TRACE 则开启 shell 执行追踪）
 ${INIT_TRACE:+set -x}
 
+# -------------------------- 注册核心命令到帮助信息 --------------------------
 extra_command "start" "Start the service"
 extra_command "stop" "Stop the service"
 extra_command "restart" "Restart the service"
@@ -116,24 +154,32 @@ extra_command "enable" "Enable service autostart"
 extra_command "disable" "Disable service autostart"
 extra_command "enabled" "Check if service is started on boot"
 
+# 加载具体服务的自定义脚本（如 /etc/init.d/dnsmasq），覆盖默认空函数
 . "$initscript"
 
+# -------------------------- Procd 模式扩展（若启用 USE_PROCD） --------------------------
 [ -n "$USE_PROCD" ] && {
+
+	# 注册 Procd 专属命令到帮助信息
 	extra_command "running" "Check if service is running"
 	extra_command "status" "Service status"
 	extra_command "trace" "Start with syscall trace"
 	extra_command "info" "Dump procd service info"
 
+	# 加载 Procd 核心函数库
 	. $IPKG_INSTROOT/lib/functions/procd.sh
+	# 获取服务脚本的真实路径（处理软链接）
 	basescript=$(readlink "$initscript")
+	# Procd 服务配置函数：向 procd 注册服务信息
 	rc_procd() {
-		local method="set"
-		[ -n "$2" ] && method="add"
-		procd_open_service "$(basename ${basescript:-$initscript})" "$initscript"
-		"$@"
-		procd_close_service "$method"
+		local method="set"																	# 默认方法：设置服务（覆盖）
+		[ -n "$2" ] && method="add"															# 若有第二个参数则改为添加
+		procd_open_service "$(basename ${basescript:-$initscript})" "$initscript"			# 打开 procd 服务配置（服务名+脚本路径）
+		"$@"																				# 执行传入的配置命令（如 procd_set_param command ...）
+		procd_close_service "$method"														# 关闭 procd 服务配置（应用方法：set/add）
 	}
 
+	# 重写 start 函数：基于 procd 启动服务
 	start() {
 		rc_procd start_service "$@"
 		if eval "type service_started" 2>/dev/null >/dev/null; then
@@ -141,50 +187,67 @@ extra_command "enabled" "Check if service is started on boot"
 		fi
 	}
 
+	# 重写 trace 函数：启动服务并开启系统调用追踪
 	trace() {
-		TRACE_SYSCALLS=1
-		start "$@"
+		TRACE_SYSCALLS=1		# 标记开启追踪
+		start "$@"				# 调用重写后的 start 函数
 	}
 
+	# 重写 info 函数：导出 procd 服务的 JSON 格式信息
 	info() {
-		json_init
-		json_add_string name "$(basename ${basescript:-$initscript})"
-		json_add_boolean verbose "1"
-		_procd_ubus_call list
+		json_init														# 初始化 JSON 输出
+		json_add_string name "$(basename ${basescript:-$initscript})"	# 添加服务名到 JSON
+		json_add_boolean verbose "1"									# 添加详细模式标记
+		_procd_ubus_call list											# 调用 procd ubus 接口列出服务信息
 	}
 
+	# 重写 stop 函数：基于 procd 停止服务
 	stop() {
-		procd_lock
-		stop_service "$@"
-		procd_kill "$(basename ${basescript:-$initscript})" "$1"
+		procd_lock														# 加锁防止并发操作
+		stop_service "$@"												# 调用服务自定义停止逻辑
+		procd_kill "$(basename ${basescript:-$initscript})" "$1"		# 杀死 procd 管理的服务进程
+
+		# 若服务脚本实现了 service_stopped，则执行（自定义停止后操作）
 		if eval "type service_stopped" 2>/dev/null >/dev/null; then
 			service_stopped
 		fi
 	}
 
+	# 重写 reload 函数：优先调用服务自定义重载，否则重启
 	reload() {
+		# 若服务脚本实现了 reload_service，则执行自定义重载
 		if eval "type reload_service" 2>/dev/null >/dev/null; then
 			procd_lock
 			reload_service "$@"
+		# 未实现则调用 start（重启服务）
 		else
 			start
 		fi
 	}
 
+	# 重写 running 函数：调用 service_running 检查运行状态
 	running() {
 		service_running "$@"
 	}
 
+	# 重写 status 函数：优先调用服务自定义状态，否则用 procd 默认状态
 	status() {
+		# 若服务脚本实现了 status_service，则执行自定义状态逻辑
 		if eval "type status_service" 2>/dev/null >/dev/null; then
 			status_service "$@"
+		# 否则调用procd 默认状态检查
 		else
 			_procd_status "$(basename ${basescript:-$initscript})" "$1"
 		fi
 	}
 }
 
+# -------------------------- 执行最终操作 --------------------------
+# 合并额外命令到总命令列表
 ALL_COMMANDS="${ALL_COMMANDS} ${EXTRA_COMMANDS}"
+# 合并额外帮助信息到总帮助
 ALL_HELP="${ALL_HELP}${EXTRA_HELP}"
+# 检查操作是否在合法命令列表中，否则默认执行 help
 list_contains ALL_COMMANDS "$action" || action=help
+# 执行最终操作（如 start/stop/enable/help），并传递所有入参
 $action "$@"

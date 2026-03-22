@@ -1,8 +1,11 @@
 # Copyright (C) 2006-2013 OpenWrt.org
 
+# OpenWrt 系统的 MAC 地址管理脚本
+
 . /lib/functions.sh
 . /usr/share/libubox/jshn.sh
 
+# 从二进制文件中读取 MAC 地址
 get_mac_binary() {
 	local path="$1"
 	local offset="$2"
@@ -12,22 +15,31 @@ get_mac_binary() {
 		return
 	fi
 
+	# 使用 hexdump 从文件中读取 MAC 地址
+	# -v：显示所有数据（不省略重复行）
+	# -n 6：读取 6 个字节（MAC 地址长度）
+	# -s $offset：从指定偏移量开始读取
+	# -e '5/1 "%02x:" 1/1 "%02x"'：格式化输出为 "xx:xx:xx:xx:xx:xx"
 	hexdump -v -n 6 -s $offset -e '5/1 "%02x:" 1/1 "%02x"' $path 2>/dev/null
 }
 
+# 从设备树中读取标签 MAC 地址
 get_mac_label_dt() {
 	local basepath="/proc/device-tree"
+	# cat /proc/device-tree/aliases/label-mac-device
 	local macdevice="$(cat "$basepath/aliases/label-mac-device" 2>/dev/null)"
 	local macaddr
 
 	[ -n "$macdevice" ] || return
 
+	# 尝试从设备树的 mac-address 属性读取MAC地址
 	macaddr=$(get_mac_binary "$basepath/$macdevice/mac-address" 0 2>/dev/null)
 	[ -n "$macaddr" ] || macaddr=$(get_mac_binary "$basepath/$macdevice/local-mac-address" 0 2>/dev/null)
 
 	echo $macaddr
 }
 
+# 从 board.json 配置文件中读取标签 MAC 地址
 get_mac_label_json() {
 	local cfg="/etc/board.json"
 	local macaddr
@@ -45,6 +57,7 @@ get_mac_label_json() {
 	echo $macaddr
 }
 
+# 获取标签 MAC 地址（优先从设备树，再从 JSON）
 get_mac_label() {
 	local macaddr=$(get_mac_label_dt)
 
@@ -53,6 +66,7 @@ get_mac_label() {
 	echo $macaddr
 }
 
+# 查找 MTD 字符设备
 find_mtd_chardev() {
 	local INDEX=$(find_mtd_index "$1")
 	local PREFIX=/dev/mtd
@@ -61,6 +75,7 @@ find_mtd_chardev() {
 	echo "${INDEX:+$PREFIX$INDEX}"
 }
 
+# 从 MTD 分区的 ASCII 文本中读取 MAC 地址
 get_mac_ascii() {
 	local part="$1"
 	local key="$2"
@@ -72,6 +87,7 @@ get_mac_ascii() {
 	[ -n "$mac_dirty" ] && macaddr_canonicalize "$mac_dirty"
 }
 
+# 从 MTD 分区中读取 ASCII 格式的 MAC 地址
 mtd_get_mac_ascii() {
 	local mtdname="$1"
 	local key="$2"
@@ -86,6 +102,7 @@ mtd_get_mac_ascii() {
 	get_mac_ascii "$part" "$key"
 }
 
+# 从 Arcadyan 加密的 MTD 分区中读取 MAC 地址
 mtd_get_mac_encrypted_arcadyan() {
 	local iv="00000000000000000000000000000000"
 	local key="2A4B303D7644395C3B2B7053553C5200"
@@ -117,6 +134,7 @@ mtd_get_mac_encrypted_arcadyan() {
 	[ -n "$mac_dirty" ] && macaddr_canonicalize "$mac_dirty"
 }
 
+# 从 TP-Link Deco 加密的分区中读取 MAC 地址
 mtd_get_mac_encrypted_deco() {
 	local mtdname="$1"
 
@@ -136,6 +154,7 @@ mtd_get_mac_encrypted_deco() {
 	echo $macaddr
 }
 
+# 从 UBI 分区的 UCI 配置中读取 MAC 地址
 mtd_get_mac_uci_config_ubi() {
 	local volumename="$1"
 
@@ -220,6 +239,7 @@ mmc_get_mac_binary() {
 	get_mac_binary "$part" "$offset"
 }
 
+# 对 MAC 地址进行加法运算
 macaddr_add() {
 	local mac=$1
 	local val=$2
@@ -230,6 +250,7 @@ macaddr_add() {
 	echo $oui:$nic
 }
 
+# 基于存储卡 CID 生成唯一 MAC
 macaddr_generate_from_mmc_cid() {
 	local mmc_dev=$1
 
@@ -245,6 +266,7 @@ macaddr_geteui() {
 	echo ${mac:9:2}$sep${mac:12:2}$sep${mac:15:2}
 }
 
+# 设置特定位
 macaddr_setbit() {
 	local mac=$1
 	local bit=${2:-0}
@@ -254,6 +276,7 @@ macaddr_setbit() {
 	printf "%012x" $(( 0x${mac//:/} | 2**(48-bit) )) | sed -e 's/\(.\{2\}\)/\1:/g' -e 's/:$//'
 }
 
+# 清除特定位
 macaddr_unsetbit() {
 	local mac=$1
 	local bit=${2:-0}
@@ -273,12 +296,14 @@ macaddr_unsetbit_mc() {
 	printf "%02x:%s" $((0x${mac%%:*} & ~0x01)) ${mac#*:}
 }
 
+# 生成随机 MAC
 macaddr_random() {
 	local randsrc=$(get_mac_binary /dev/urandom 0)
 	
 	echo "$(macaddr_unsetbit_mc "$(macaddr_setbit_la "${randsrc}")")"
 }
 
+# 规范化 MAC 地址格式
 macaddr_canonicalize() {
 	local mac="$1"
 	local canon=""
@@ -312,6 +337,7 @@ macaddr_canonicalize() {
 	printf "%02x:%02x:%02x:%02x:%02x:%02x" 0x${canon// / 0x} 2>/dev/null
 }
 
+# 检查设备树节点是否启用
 dt_is_enabled() {
 	grep -q okay "/proc/device-tree/$1/status"
 }
