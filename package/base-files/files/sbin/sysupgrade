@@ -1,60 +1,60 @@
 #!/bin/sh
 
-. /lib/functions.sh					# 导入OpenWrt系统函数库（通用工具函数）
-. /lib/functions/system.sh			# OpenWrt mac地址管理脚本
-. /usr/share/libubox/jshn.sh		# 导入JSON解析函数库（用于处理固件校验的JSON结果）
+. /lib/functions.sh
+. /lib/functions/system.sh
+. /usr/share/libubox/jshn.sh
 
 # File-local constants
-CONF_TAR=/tmp/sysupgrade.tgz		# 配置备份压缩包路径
-ETCBACKUP_DIR=/etc/backup			# 备份文件存储目录
-INSTALLED_PACKAGES=${ETCBACKUP_DIR}/installed_packages.txt	# 已安装软件包列表文件
-COMMAND=/lib/upgrade/do_stage2		# 固件升级第二阶段执行脚本
+CONF_TAR=/tmp/sysupgrade.tgz
+ETCBACKUP_DIR=/etc/backup
+INSTALLED_PACKAGES=${ETCBACKUP_DIR}/installed_packages.txt
+COMMAND=/lib/upgrade/do_stage2
 
 # File-local globals
-SAVE_OVERLAY=0						# 是否备份overlay分区（0=否，1=是）
-SAVE_OVERLAY_PATH=					# overlay分区备份路径（/etc或/）
-SAVE_PARTITIONS=1					# 是否恢复分区表（1=恢复，0=不恢复）
-SAVE_INSTALLED_PKGS=0				# 是否备份已安装软件包列表（0=否，1=是）
-SKIP_UNCHANGED=0					# 是否跳过与/rom中一致的文件（0=否，1=是）
-CONF_IMAGE=							# 自定义配置备份文件路径
-CONF_BACKUP_LIST=0					# 是否仅列出备份文件（0=否，1=是）
-CONF_BACKUP=						# 创建备份的目标文件路径
-CONF_RESTORE=						# 恢复备份的源文件路径
-NEED_IMAGE=							# 标记是否需要固件镜像（备份/恢复时不需要）
-HELP=0								# 是否显示帮助信息（0=否，1=是）
-TEST=0								# 是否仅测试（不实际刷机，0=否，1=是）
+SAVE_OVERLAY=0
+SAVE_OVERLAY_PATH=
+SAVE_PARTITIONS=1
+SAVE_INSTALLED_PKGS=0
+SKIP_UNCHANGED=0
+CONF_IMAGE=
+CONF_BACKUP_LIST=0
+CONF_BACKUP=
+CONF_RESTORE=
+NEED_IMAGE=
+HELP=0
+TEST=0
 
 # Globals accessed in other files
-export MTD_ARGS=""					# MTD设备操作参数（适配不同闪存）
-export MTD_CONFIG_ARGS=""			# MTD配置操作参数
-export INTERACTIVE=0				# 是否交互式模式（0=否，1=是）
-export VERBOSE=1					# 日志详细级别（1=默认，越大越详细）
-export SAVE_CONFIG=1				# 是否保留配置（1=保留，0=不保留）
-export IGNORE_MINOR_COMPAT=0		# 是否忽略次要版本兼容性（0=否，1=是）
-export FORCE=0						# 是否强制刷机（忽略校验失败，0=否，1=是）
-export CONFFILES=/tmp/sysupgrade.conffiles	# 待备份配置文件列表路径
+export MTD_ARGS=""
+export MTD_CONFIG_ARGS=""
+export INTERACTIVE=0
+export VERBOSE=1
+export SAVE_CONFIG=1
+export IGNORE_MINOR_COMPAT=0
+export FORCE=0
+export CONFFILES=/tmp/sysupgrade.conffiles
 
-# parse options 解析命令行参数
+# parse options
 while [ -n "$1" ]; do
 	case "$1" in
-		-i) export INTERACTIVE=1;;												# -i：启用交互式模式（询问确认）
-		-v) export VERBOSE="$(($VERBOSE + 1))";;								# -v：增加日志详细度
-		-q) export VERBOSE="$(($VERBOSE - 1))";;								# -q：降低日志详细度
-		-n) export SAVE_CONFIG=0;;												# -n：刷机时不保留配置
-		-c) SAVE_OVERLAY=1 SAVE_OVERLAY_PATH=/etc;;								# -c：备份/etc目录下所有修改的文件
-		-o) SAVE_OVERLAY=1 SAVE_OVERLAY_PATH=/;;								# -o：备份/目录下所有修改的文件（排除软件包）
-		-p) SAVE_PARTITIONS=0;;													# -p：刷机后不恢复分区表
-		-k) SAVE_INSTALLED_PKGS=1;;												# -k：备份已安装软件包列表
-		-u) SKIP_UNCHANGED=1;;													# -u：跳过与/rom中一致的文件（不备份）
-		-b|--create-backup) CONF_BACKUP="$2" NEED_IMAGE=1; shift;;				# -b：创建配置备份（指定目标文件）
-		-r|--restore-backup) CONF_RESTORE="$2" NEED_IMAGE=1; shift;;			# -r：恢复配置备份（指定源文件）
-		-l|--list-backup) CONF_BACKUP_LIST=1;;									# -l：仅列出会备份的文件（不实际备份）
-		-f) CONF_IMAGE="$2"; shift;;											# -f：从指定tar.gz恢复配置
-		-F|--force) export FORCE=1;;											# -F：强制刷机（忽略镜像校验失败）
-		-T|--test) TEST=1;;														# -T：仅测试（校验镜像/配置，不刷机）
-		-h|--help) HELP=1; break;;												# -h：显示帮助信息并退出循环
-		--ignore-minor-compat-version) export IGNORE_MINOR_COMPAT=1;;			# 忽略次要版本兼容性
-		-*)																		# 未知参数
+		-i) export INTERACTIVE=1;;
+		-v) export VERBOSE="$(($VERBOSE + 1))";;
+		-q) export VERBOSE="$(($VERBOSE - 1))";;
+		-n) export SAVE_CONFIG=0;;
+		-c) SAVE_OVERLAY=1 SAVE_OVERLAY_PATH=/etc;;
+		-o) SAVE_OVERLAY=1 SAVE_OVERLAY_PATH=/;;
+		-p) SAVE_PARTITIONS=0;;
+		-k) SAVE_INSTALLED_PKGS=1;;
+		-u) SKIP_UNCHANGED=1;;
+		-b|--create-backup) CONF_BACKUP="$2" NEED_IMAGE=1; shift;;
+		-r|--restore-backup) CONF_RESTORE="$2" NEED_IMAGE=1; shift;;
+		-l|--list-backup) CONF_BACKUP_LIST=1;;
+		-f) CONF_IMAGE="$2"; shift;;
+		-F|--force) export FORCE=1;;
+		-T|--test) TEST=1;;
+		-h|--help) HELP=1; break;;
+		--ignore-minor-compat-version) export IGNORE_MINOR_COMPAT=1;;
+		-*)
 			echo "Invalid option: $1" >&2
 			exit 1
 		;;
@@ -63,7 +63,6 @@ while [ -n "$1" ]; do
 	shift;
 done
 
-# 帮助信息打印函数
 print_help() {
 	cat <<EOF
 Usage: $0 [<upgrade-option>...] <image file or URL>
@@ -106,22 +105,18 @@ backup-command:
 EOF
 }
 
-# 固件镜像路径
 IMAGE="$1"
 
-# 如果需要显示帮助，打印帮助并退出
 if [ $HELP -gt 0 ]; then
 	print_help
 	exit 0
 fi
 
-# 校验参数合法性：无镜像、无需镜像、非仅列备份 → 显示帮助并退出
 if [ -z "$IMAGE" -a -z "$NEED_IMAGE" -a $CONF_BACKUP_LIST -eq 0 ]; then
 	print_help
 	exit 1
 fi
 
-# 校验参数合法性：同时指定了镜像和备份/恢复命令 → 报错退出
 [ -n "$IMAGE" -a -n "$NEED_IMAGE" ] && {
 	cat <<-EOF
 		-b|--create-backup and -r|--restore-backup do not perform a firmware upgrade.
@@ -131,13 +126,10 @@ fi
 }
 
 # prevent messages from clobbering the tarball when using stdout
-# 防止在使用标准输出时消息覆盖 tarball 文件
-# 特殊处理：备份文件为stdout（-）时，设置日志级别为0（静默）
 [ "$CONF_BACKUP" = "-" ] && export VERBOSE=0
 
-# 定义函数：列出所有配置文件（opkg/apk管理的conffiles）
+
 list_conffiles() {
-	# 处理opkg包管理器（OpenWrt默认）, 从 OpenWrt 的 opkg 包管理器状态文件 /usr/lib/opkg/status 中，提取所有软件包的「配置文件（Conffiles）」列表
 	if [ -f /usr/lib/opkg/status ]; then
 		awk '
 			BEGIN { conffiles = 0 }
@@ -145,7 +137,6 @@ list_conffiles() {
 			!/^ / { conffiles = 0; next }
 			conffiles == 1 { print }
 		' /usr/lib/opkg/status
-	# 处理apk包管理器（部分衍生版）
 	elif [ -d /lib/apk/packages ]; then
 		conffiles=""
 		for file in /lib/apk/packages/*.conffiles_static; do
@@ -155,88 +146,67 @@ list_conffiles() {
 	fi
 }
 
-# 定义函数：列出所有修改过的配置文件（对比校验和）
 list_changed_conffiles() {
 	# Cannot handle spaces in filenames - but opkg cannot either...
-	# 无法处理文件名含空格（opkg也不支持）
 	list_conffiles | while read file csum; do
-		# 文件不可读则跳过
 		[ -r "$file" ] || continue
-		# 校验文件校验和，不一致则输出文件名
+
 		echo "${csum}  ${file}" | busybox sha256sum -sc - || echo "$file"
 	done
 }
 
-# 列出静态配置文件（sysupgrade.conf/keep.d中指定的）
 list_static_conffiles() {
-	# find命令过滤条件
 	local filter=$1
 
-	# 读取sysupgrade.conf和keep.d下的文件，过滤空行/注释行，执行find
 	find $(sed -ne '/^[[:space:]]*$/d; /^#/d; p' \
 		/etc/sysupgrade.conf /lib/upgrade/keep.d/* 2>/dev/null) \
 		\( -type f -o -type l \) $filter 2>/dev/null
 }
 
-# 构建配置文件备份列表（默认模式）
 build_list_of_backup_config_files() {
-	# 输出文件路径
 	local file="$1"
 
-	# 合并静态配置文件和修改过的配置文件，去重后写入目标文件
 	( list_static_conffiles "$find_filter"; list_changed_conffiles ) |
 		sort -u > "$file"
 	return 0
 }
 
-# 构建overlay分区文件备份列表（-c/-o模式）
 build_list_of_backup_overlay_files() {
-	# 输出文件路径
 	local file="$1"
 
-	# 创建软件包文件列表临时文件
 	local packagesfiles=$1.packagesfiles
 	touch "$packagesfiles"
 
-	# 若备份根目录/
 	if [ "$SAVE_OVERLAY_PATH" = / ]; then
 		local conffiles=$1.conffiles
 		local keepfiles=$1.keepfiles
 
-		# 提取opkg配置文件列表并去重
 		list_conffiles | cut -f2 -d ' ' | sort -u > "$conffiles"
 
 		# backup files from /etc/sysupgrade.conf and /lib/upgrade/keep.d, but
 		# ignore those aready controlled by opkg conffiles
-		# 备份sysupgrade.conf/keep.d中的文件，但排除opkg已管理的配置文件
 		list_static_conffiles | sort -u |
 			grep -h -v -x -F -f $conffiles > "$keepfiles"
 
 		# backup conffiles, but only those changed if '-u'
-		# 若启用-u参数，仅备份修改过的配置文件
 		[ $SKIP_UNCHANGED = 1 ] &&
 			list_changed_conffiles | sort -u > "$conffiles"
 
 		# do not backup files from packages, except those listed
 		# in conffiles and keep.d
-		# 不备份软件包文件（除了配置文件和keep.d中指定的）, 排除配置文件, 排除keep.d文件
 		{
-			# 读取所有软件包安装的文件列表
 			find /usr/lib/opkg/info -type f -name "*.list" -exec cat {} \;
-			# 读取软件包替代项
 			find /usr/lib/opkg/info -type f -name "*.control" -exec sed \
 				-ne '/^Alternatives/{s/^Alternatives: //;s/, /\n/g;p}' {} \; |
 				cut -f2 -d:
 		} |  grep -v -x -F -f $conffiles |
 		     grep -v -x -F -f $keepfiles | sort -u > "$packagesfiles"
-		rm -f "$keepfiles" "$conffiles"		# 删除临时文件
+		rm -f "$keepfiles" "$conffiles"
 	fi
 
 	# busybox grep bug when file is empty
-	# busybox grep空文件bug处理：确保文件非空
 	[ -s "$packagesfiles" ] || echo > $packagesfiles
 
-	# 遍历overlay分区的upper目录（实际修改的文件），过滤不需要备份的文件
 	( cd /overlay/upper/; find .$SAVE_OVERLAY_PATH \( -type f -o -type l \) $find_filter | sed \
 		-e 's,^\.,,' \
 		-e '\,^/etc/board.json$,d' \
@@ -251,67 +221,49 @@ build_list_of_backup_overlay_files() {
 	return 0
 }
 
-# 备份overlay分区
 if [ $SAVE_OVERLAY = 1 ]; then
-	# 校验overlay分区是否存在
 	[ ! -d /overlay/upper/etc ] && {
 		echo "Cannot find '/overlay/upper/etc', required for '-c' or '-o'" >&2
 		exit 1
 	}
-	sysupgrade_init_conffiles="build_list_of_backup_overlay_files"		# 使用overlay备份函数
+	sysupgrade_init_conffiles="build_list_of_backup_overlay_files"
 else
-	sysupgrade_init_conffiles="build_list_of_backup_config_files"		# 使用默认备份函数
+	sysupgrade_init_conffiles="build_list_of_backup_config_files"
 fi
 
-# 设置find过滤条件：-u参数时，仅保留与/rom中不同的文件
 find_filter=""
 if [ $SKIP_UNCHANGED = 1 ]; then
-	# 校验/rom目录是否存在（-u必需）
 	[ ! -d /rom/ ] && {
 		echo "'/rom/' is required by '-u'"
 		exit 1
 	}
-	
-	# 过滤逻辑：文件在/rom中且内容一致则跳过，否则输出
 	find_filter='( ( -exec test -e /rom/{} ; -exec cmp -s /{} /rom/{} ; ) -o -print )'
 fi
 
-# 导入升级平台适配函数库（不同设备的刷机逻辑）
 include /lib/upgrade
 
-# 定义函数：创建配置备份压缩包
 create_backup_archive() {
-	local conf_tar="$1"		# 备份文件路径（-表示stdout）
-	local disabled			# 存储禁用的服务列表
-	local err				# 存储错误码
+	local conf_tar="$1"
+	local disabled
+	local err
 
-	# 校验：若运行在内存盘（tmpfs），无法保存配置
 	[ "$(rootfs_type)" = "tmpfs" ] && {
 		echo "Cannot save config while running from ramdisk." >&2
-		# 交互式询问是否终止
 		ask_bool 0 "Abort" && exit
 		return 0
 	}
-	# 执行钩子函数，构建配置文件列表
 	run_hooks "$CONFFILES" $sysupgrade_init_conffiles
-	# 交互式询问是否编辑配置文件列表
 	ask_bool 0 "Edit config file list" && vi "$CONFFILES"
 
-	# 处理stdout输出（-）
 	[ "$conf_tar" != "-" ] || conf_tar=""
 
-	# 打印日志（v函数依赖VERBOSE级别）
 	v "Saving config files..."
-	# 设置tar详细级别
 	[ "$VERBOSE" -gt 1 ] && TAR_V="v" || TAR_V=""
-	# 移除配置文件列表中开头的/（适配tar的-C /参数）
 	sed -i -e 's,^/,,' "$CONFFILES"
-	# 启用管道失败检测（管道中任一命令失败则整体失败）
 	set -o pipefail
 	{
 		local ret=0
 
-		# 第一步：备份禁用的服务列表
 		if [ $ret -eq 0 ]; then
 			for service in /etc/init.d/*; do
 				if ! $service enabled; then
@@ -319,18 +271,14 @@ create_backup_archive() {
 				fi
 			done
 			disabled="$disabled\nexit 0"
-			# 向tar包中添加禁用服务的初始化脚本
 			tar_print_member "/etc/uci-defaults/10_disable_services" "$(echo -e $disabled)" || ret=1
 		fi
 
 		# Part of archive with installed packages info
-		# 第二步：备份已安装软件包列表（-k参数启用时）
 		if [ $ret -eq 0 ]; then
 			if [ "$SAVE_INSTALLED_PKGS" -eq 1 ]; then
 				# Format: pkg-name<TAB>{rom,overlay,unknown}
 				# rom is used for pkgs in /rom, even if updated later
-				# 格式：包名<TAB>{rom,overlay,unknown}
-				# rom=只读分区包，overlay=可写分区包，unknown=未知
 				if [ -d "/usr/lib/opkg/info" ]; then
 					tar_print_member "$INSTALLED_PACKAGES" "$(find /usr/lib/opkg/info -name "*.control" \( \
 						\( -exec test -f /rom/{} \; -exec echo {} rom \; \) -o \
@@ -348,163 +296,135 @@ create_backup_archive() {
 		fi
 
 		# Rest of archive with config files and ending padding
-		# 第三步：备份配置文件并添加填充
 		if [ $ret -eq 0 ]; then
-			tar c${TAR_V} -C / -T "$CONFFILES" || ret=1		# 从列表读取文件并打包
+			tar c${TAR_V} -C / -T "$CONFFILES" || ret=1
 		fi
 
-		[ $ret -eq 0 ]	# 返回打包结果
-	} | gzip > "${conf_tar:-/proc/self/fd/1}"				# 压缩为gz格式，输出到目标文件/stdout
-	err=$?				# 获取管道整体错误码
-	set +o pipefail		# 关闭管道失败检测
+		[ $ret -eq 0 ]
+	} | gzip > "${conf_tar:-/proc/self/fd/1}"
+	err=$?
+	set +o pipefail
 
-	# 处理打包失败
 	if [ "$err" -ne 0 ]; then
 		echo "Failed to create the configuration backup."
-		[ -f "$conf_tar" ] && rm -f "$conf_tar"				# 删除损坏的备份文件
+		[ -f "$conf_tar" ] && rm -f "$conf_tar"
 	fi
 
-	rm -f "$CONFFILES"			# 删除临时配置文件列表
+	rm -f "$CONFFILES"
 
 	return "$err"
 }
 
-# 仅列出备份文件列表(-l参数)
 if [ $CONF_BACKUP_LIST -eq 1 ]; then
-	run_hooks "$CONFFILES" $sysupgrade_init_conffiles								# 构建配置文件列表
-	[ "$SAVE_INSTALLED_PKGS" -eq 1 ] && echo ${INSTALLED_PACKAGES} >> "$CONFFILES"	# 添加软件包列表
-	cat "$CONFFILES"		# 输出列表
-	rm -f "$CONFFILES"		# 删除临时文件
+	run_hooks "$CONFFILES" $sysupgrade_init_conffiles
+	[ "$SAVE_INSTALLED_PKGS" -eq 1 ] && echo ${INSTALLED_PACKAGES} >> "$CONFFILES"
+	cat "$CONFFILES"
+	rm -f "$CONFFILES"
 	exit 0
 fi
 
-# 创建配置备份（-b参数）
 if [ -n "$CONF_BACKUP" ]; then
 	create_backup_archive "$CONF_BACKUP"
 	exit
 fi
 
-# 恢复配置备份（-r参数）
 if [ -n "$CONF_RESTORE" ]; then
-	# 校验备份文件是否存在（非stdin时）
 	if [ "$CONF_RESTORE" != "-" ] && [ ! -f "$CONF_RESTORE" ]; then
 		echo "Backup archive '$CONF_RESTORE' not found." >&2
 		exit 1
 	fi
 
-	# 设置tar详细级别
 	[ "$VERBOSE" -gt 1 ] && TAR_V="v" || TAR_V=""
 	v "Restoring config files..."
-	# 优先使用平台专属的恢复函数，否则用通用tar解压
 	if [ "$(type -t platform_restore_backup)" == 'platform_restore_backup' ]; then
 		platform_restore_backup "$TAR_V"
 	else
-		tar -C / -x${TAR_V}zf "$CONF_RESTORE"	# 解压备份到根目录
+		tar -C / -x${TAR_V}zf "$CONF_RESTORE"
 	fi
 	exit $?
 fi
 
-# 校验：当前平台是否实现了固件升级逻辑
 type platform_check_image >/dev/null 2>/dev/null || {
 	echo "Firmware upgrade is not implemented for this platform." >&2
 	exit 1
 }
 
-# 处理固件镜像为HTTP/HTTPS URL的情况
 case "$IMAGE" in
 	http://*|\
 	https://*)
-		wget -O/tmp/sysupgrade.img "$IMAGE" || exit 1		# 下载镜像到临时目录
+		wget -O/tmp/sysupgrade.img "$IMAGE" || exit 1
 		IMAGE=/tmp/sysupgrade.img
 		;;
 esac
 
-# 获取镜像文件的绝对路径
 IMAGE="$(readlink -f "$IMAGE")"
 
-# 处理镜像文件路径：非/tmp目录则复制到/tmp（避免刷机时文件被占用）
 case "$IMAGE" in
 	'')
 		echo "Image file not found." >&2
 		exit 1
 		;;
-	/tmp/*)	;;		# 已在/tmp，无需处理
+	/tmp/*)	;;
 	*)
 		v "Image not in /tmp, copying..."
-		cp -f "$IMAGE" /tmp/sysupgrade.img		# 复制到/tmp
+		cp -f "$IMAGE" /tmp/sysupgrade.img
 		IMAGE=/tmp/sysupgrade.img
 		;;
 esac
 
-# 校验固件镜像合法性
 json_load "$(/usr/libexec/validate_firmware_image "$IMAGE")" || {
 	echo "Failed to check image"
 	exit 1
 }
-
-# 获取校验结果（1=合法，0=非法）
 json_get_var valid "valid"
 [ "$valid" -eq 0 ] && {
 	if [ $FORCE -eq 1 ]; then
-		echo "Image check failed but --force given - will update anyway!" >&2	# 强制刷机警告
+		echo "Image check failed but --force given - will update anyway!" >&2
 	else
 		echo "Image check failed." >&2
 		exit 1
 	fi
 }
 
-# 处理自定义配置备份（-f参数）
 if [ -n "$CONF_IMAGE" ]; then
-	# 校验配置文件是否为gz格式
 	case "$(get_magic_word $CONF_IMAGE cat)" in
 		# .gz files
-		1f8b) ;;		# gz文件魔数，合法
+		1f8b) ;;
 		*)
 			echo "Invalid config file. Please use only .tar.gz files" >&2
 			exit 1
 		;;
 	esac
-	# 提取配置文件到临时备份包
 	get_image "$CONF_IMAGE" "cat" > "$CONF_TAR"
-	# 强制保留配置
 	export SAVE_CONFIG=1
-# 交互式询问是否保留配置，确认则创建备份
 elif ask_bool $SAVE_CONFIG "Keep config files over reflash"; then
 	[ $TEST -eq 1 ] || create_backup_archive "$CONF_TAR" || exit
 	export SAVE_CONFIG=1
-# 不保留配置，删除临时备份包
 else
 	[ $TEST -eq 1 ] || rm -f "$CONF_TAR"
 	export SAVE_CONFIG=0
 fi
 
-# 仅测试模式（-T参数），直接退出
 if [ $TEST -eq 1 ]; then
 	exit 0
 fi
 
-# 安装upgraded工具（刷机核心工具）
 install_bin /sbin/upgraded
 v "Commencing upgrade. Closing all shell sessions."
 
-# 处理安全模式（failsafe）下的刷机
 if [ -n "$FAILSAFE" ]; then
-	# 写入刷机参数到临时文件
 	printf '%s\x00%s\x00%s' "$RAM_ROOT" "$IMAGE" "$COMMAND" >/tmp/sysupgrade
-	# 释放安全模式锁
 	lock -u /tmp/.failsafe
 else
-	# 正常模式：通过ubus调用系统升级接口
 	json_init
-	json_add_string prefix "$RAM_ROOT"								# 内存根目录
-	json_add_string path "$IMAGE"									# 固件镜像路径
-	[ $FORCE -eq 1 ] && json_add_boolean force 1					# 强制刷机标记
-	[ $SAVE_CONFIG -eq 1 ] && json_add_string backup "$CONF_TAR"	# 配置备份路径
-	json_add_string command "$COMMAND"								# 第二阶段命令
+	json_add_string prefix "$RAM_ROOT"
+	json_add_string path "$IMAGE"
+	[ $FORCE -eq 1 ] && json_add_boolean force 1
+	[ $SAVE_CONFIG -eq 1 ] && json_add_string backup "$CONF_TAR"
+	json_add_string command "$COMMAND"
 	json_add_object options
-	json_add_int save_partitions "$SAVE_PARTITIONS"					# 是否恢复分区表
+	json_add_int save_partitions "$SAVE_PARTITIONS"
 	json_close_object
 
-	# 调用ubus触发系统升级
 	ubus call system sysupgrade "$(json_dump)"
 fi
