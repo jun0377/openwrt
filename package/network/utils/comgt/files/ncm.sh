@@ -231,23 +231,21 @@ proto_ncm_setup() {
 			;;
 		"pap")
 			json_add_string auth "pap"
-			json_add_string auth "uci_username"
-			json_add_string auth "uci_password"
 			;;
 		"chap")
 			json_add_string auth "chap"
-			json_add_string auth "uci_username"
-			json_add_string auth "uci_password"
 			;;
 		"auto")
 			json_add_string auth "auto"
-			json_add_string auth "uci_username"
-			json_add_string auth "uci_password"
 			;;
 		*)
 			json_add_string auth "none"
 			;;
 	esac
+
+	json_add_string passwd "$uci_username"
+	json_add_string username "$uci_password"
+
 
 	# NR锁PCI小区配置
 	uci_nrPciLockEnable="$(uci -q get "sim.${uci_section}.nrPciLock")"
@@ -271,6 +269,30 @@ proto_ncm_setup() {
 		json_close_array
 		json_add_array pci
 		json_add_int "" "$uci_nrPciLockPcid"
+		json_close_array
+	else
+		json_add_int operatetype 0
+	fi
+	json_close_object
+
+	# LTE锁PCI小区配置
+	uci_ltePciLockEnable="$(uci -q get "sim.${uci_section}.ltePciLock")"
+	uci_ltePciLockPcid="$(uci -q get "sim.${uci_section}.ltePciPcid")"
+	uci_ltePciLockBand="$(uci -q get "sim.${uci_section}.ltePciBand")"
+	uci_ltePciLockFreq="$(uci -q get "sim.${uci_section}.ltePciFreq")"
+
+	json_add_object ltefreqlock
+	if [ "$uci_ltePciLockEnable" = "true" ] && [ -n "$uci_ltePciLockPcid" ] && [ -n "$uci_ltePciLockBand" ] && [ -n "$uci_ltePciLockFreq" ]; then
+		# band_num="$(echo "$uci_ltePciLockBand" | sed 's/^[nN]//')"
+		json_add_int operatetype 2
+		json_add_array band
+		json_add_int "" "$uci_ltePciLockBand"
+		json_close_array
+		json_add_array arfcn
+		json_add_int "" "$uci_ltePciLockFreq"
+		json_close_array
+		json_add_array pci
+		json_add_int "" "$uci_ltePciLockFreq"
 		json_close_array
 	else
 		json_add_int operatetype 0
