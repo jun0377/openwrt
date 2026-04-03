@@ -243,8 +243,8 @@ proto_ncm_setup() {
 			;;
 	esac
 
-	json_add_string passwd "$uci_username"
-	json_add_string username "$uci_password"
+	json_add_string passwd "$uci_password"
+	json_add_string username "$uci_username"
 
 
 	# NR锁PCI小区配置
