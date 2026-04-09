@@ -292,7 +292,7 @@ proto_ncm_setup() {
 		json_add_int "" "$uci_ltePciLockFreq"
 		json_close_array
 		json_add_array pci
-		json_add_int "" "$uci_ltePciLockFreq"
+		json_add_int "" "$uci_ltePciLockPcid"
 		json_close_array
 	else
 		json_add_int operatetype 0
