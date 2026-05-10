@@ -4,6 +4,7 @@ START=19
 USE_PROCD=1
 QUIET=""
 
+# 用 uci_validate_section 校验 redirect 段的字段类型/取值范围，避免错误配置导致 fw3 应用失败
 validate_firewall_redirect()
 {
 	uci_validate_section firewall redirect "${1}" \
@@ -17,6 +18,7 @@ validate_firewall_redirect()
 		'target:or("SNAT", "DNAT")'
 }
 
+# 用 uci_validate_section 校验 rule 段的字段类型/取值范围，避免错误配置导致 fw3 应用失败
 validate_firewall_rule()
 {
 	uci_validate_section firewall rule "${1}" \
@@ -29,26 +31,31 @@ validate_firewall_rule()
 }
 
 service_triggers() {
-	procd_add_reload_trigger firewall	
+	procd_add_reload_trigger firewall	# /etc/config/firewall提交变更时，触发本服务 reload
 
+	# 在 reload 前做 UCI 配置校验
 	procd_open_validate
-	validate_firewall_redirect
-	validate_firewall_rule
+	validate_firewall_redirect			# 校验redirect段配置
+	validate_firewall_rule				# 校验rule段配置
 	procd_close_validate
 }
 
+# 调用 fw3 restart
 restart() {
 	fw3 restart
 }
 
+# 调用 fw3 start 应用 /etc/config/firewall
 start_service() {
 	fw3 ${QUIET} start
 }
 
+# 调用 fw3 flush 清空规则
 stop_service() {
 	fw3 flush
 }
 
+# 调用 fw3 reload 重新加载配置
 reload_service() {
 	fw3 reload
 }
