@@ -19,6 +19,8 @@ function get_simindex_by_usb()
     [ "${USB}" == "2-2:2.3" ] && echo "SIM_5G_1"
     [ "${USB}" == "2-3:2.3" ] && echo "SIM_5G_2"
     [ "${USB}" == "2-1:2.3" ] && echo "SIM_5G_3"
+	[ "${USB}" == "3-1.3:2.3" ] && echo "SIM_5G_4"
+	[ "${USB}" == "3-1.1:2.3" ] && echo "SIM_5G_5"
 }
 
 [ -n "$INCLUDE_ONLY" ] || {
