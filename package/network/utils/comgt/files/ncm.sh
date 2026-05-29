@@ -2,27 +2,6 @@
 
 # NCM协议处理脚本，用于OpenWrt系统中管理NCM调制解调器连接
 
-
-# 通过usb总线号和端口号，获取/dev/ttyUSBx
-function get_usb_by_ttyUSB()
-{
-    # /dev/ttyUSB2 => ttyUSB2
-    local ttyUSB=$(basename $1)
-    echo $(find /sys/devices/platform -name ${ttyUSB} | head -n 1 | awk -F'/' '{print $(NF-1)}')
-}
-
-# 通过usb总线号和端口号，获取链路名称
-# TODO: 这个配置应该放到UCI配置文件中, ncm.sh应该是一个通用的脚本
-function get_simindex_by_usb()
-{
-    local USB=$1
-    [ "${USB}" == "2-2:2.3" ] && echo "SIM_5G_1"
-    [ "${USB}" == "2-3:2.3" ] && echo "SIM_5G_2"
-    [ "${USB}" == "2-1:2.3" ] && echo "SIM_5G_3"
-	[ "${USB}" == "3-1.3:2.3" ] && echo "SIM_5G_4"
-	[ "${USB}" == "3-1.1:2.3" ] && echo "SIM_5G_5"
-}
-
 [ -n "$INCLUDE_ONLY" ] || {
 	
 	logger -t "NCM" "Init..."
@@ -81,16 +60,16 @@ proto_ncm_init_config() {
 # NCM协议连接建立函数
 proto_ncm_setup() {
 
-	logger -t "NCM" "Enter proto_ncm_setup, interface:$1"
+	logger -t "NCM" "Enter proto_ncm_setup"
 
 	# 获取接口名称参数
 	local interface="$1"
 	logger -t "NCM" "interface:${interface}"
 
 	# 声明本地变量用于存储调制解调器相关信息
-	local manufacturer initialize setmode connect finalize devname devpath ifpath
+	local manufacturer devname devpath ifpath
 
-	local device ifname  apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
+	local device ifname apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
 	json_get_vars device ifname apn auth username password pincode delay mode pdptype sourcefilter delegate profile $PROTO_DEFAULT_OPTIONS
 
 	local context_type
@@ -101,24 +80,39 @@ proto_ncm_setup() {
 	[ -n "$profile" ] || profile=1
 	# logger -t "NCM" "profile:${profile}"
 
-	# 必须指定 /dev/ttyUSB
-	[ -n "$device" ] || {
-		# 输出错误信息
-		echo "No control device specified"
-		logger -t "NCM" "No control device specified"
-		# 通知协议错误
-		proto_notify_error "$interface" NO_DEVICE
-		# 设置接口不可用
+	# /dev/ttyUSB验证
+	# 根据sysfs中的USB设备路径, 获取真实的网口名称和拨号节点
+	local sysfs_base=$(uci -q get sim.${interface}.usb)	# 如:/sys/devices/platform/scb/fe9c0000.xhci/usb3/3-1/3-1.1
+	# 路径不存在
+	[ ! -d "${sysfs_base}" ] && {
+		logger -t "NCM" "interface:${interface} sysfs:${sysfs_base} does not exist! "
 		proto_set_available "$interface" 0
 		return 1
 	}
 
+	logger -t "NCM" "interface:${interface} base sysfs: ${sysfs_base}"
+
+	# 获取ttyUSB名称
+	local uci_ttyUSB=$(uci -q get sim.${interface}.ttyUSB)
+	local sysfs_ttyusb=$(readlink -f ${sysfs_base}/${uci_ttyUSB}/ttyUSB*)
+	[ -z "${sysfs_ttyusb}" ] && {
+		logger -t "NCM" "interface:${interface} ttyUSB in sysfs does not exist! "
+		proto_set_available "$interface" 0
+		return 1
+	}
+	[ ! -d "${sysfs_ttyusb}" ] && {
+		logger -t "NCM" "interface:${interface} ttyUSB sysfs:${sysfs_ttyusb} does not exist! "
+		proto_set_available "$interface" 0
+		return 1
+	}
+	
+	logger -t "NCM" "interface:${interface} tty sysfs: ${sysfs_ttyusb}"
+
 	# 获取设备的真实路径
-	device="$(readlink -f $device)"
+	device="/dev/$(basename ${sysfs_ttyusb})"
 	# 检查设备是否存在
 	[ -e "$device" ] || {
-		echo "Control device not valid"
-		logger -t "NCM" "Control device not valid"
+		logger -t "NCM" "Control device does not valid"
 		proto_set_available "$interface" 0
 		return 1
 	}
@@ -171,19 +165,12 @@ proto_ncm_setup() {
 	start=$(date '+%F %T')
 	logger -t "NCM" "start dial at ${start}"
 
-	# 获取USB总线和端口号
-	local USB=$(get_usb_by_ttyUSB ${device})
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} USB:${USB}"
-	# 获取uci配置section
-	local uci_section=$(get_simindex_by_usb ${USB})
-	logger -t "NCM" "$FUNCNAME uci section:${uci_section}"
-
 	# 拨号配置参数
 	. /usr/share/libubox/jshn.sh
 	json_init
 
 	# 设置入网方式
-	local net=$(uci -q get sim.${uci_section}.net)
+	local net=$(uci -q get sim.${interface}.net)
 	net=$(echo ${net} | tr 'A-Z' 'a-z')
 	logger -t "NCM" "uci sim net:${net}"
 	local json_rat
@@ -205,21 +192,21 @@ proto_ncm_setup() {
 			json_add_string rat "sa+nsa"
 
 			net=auto
-			uci set sim.${uci_section}.net=auto && uci commit sim
-			logger -t "NCM" "uci set sim.${uci_section}.net=auto && uci commit sim"
+			uci set sim.${interface}.net=auto && uci commit sim
+			logger -t "NCM" "uci set sim.${interface}.net=auto && uci commit sim"
 			;;
 	esac
 
 	# 设置APN
-	local uci_apn=$(uci -q get sim.${uci_section}.apn)
+	local uci_apn=$(uci -q get sim.${interface}.apn)
 	json_add_string apn "${uci_apn}"
 
 	logger -t "NCM" "uci sim apn:${uci_apn}"
 	
 	# 设置鉴权
-	uci_auth=$(uci -q get sim.${uci_section}.auth)
-	uci_username=$(uci -q get sim.${uci_section}.user)
-	uci_password=$(uci -q get sim.${uci_section}.passwd)
+	uci_auth=$(uci -q get sim.${interface}.auth)
+	uci_username=$(uci -q get sim.${interface}.user)
+	uci_password=$(uci -q get sim.${interface}.passwd)
 
 	uci_auth=$(echo ${uci_auth} | tr 'A-Z' 'a-z')
 	logger -t "NCM" "uci sim auth:${uci_auth}"
@@ -250,11 +237,11 @@ proto_ncm_setup() {
 
 
 	# NR锁PCI小区配置
-	uci_nrPciLockEnable="$(uci -q get "sim.${uci_section}.nrPciLock")"
-	uci_nrPciLockPcid="$(uci -q get "sim.${uci_section}.nrPciPcid")"
-	uci_nrPciLockBand="$(uci -q get "sim.${uci_section}.nrPciBand")"
-	uci_nrPciLockFreq="$(uci -q get "sim.${uci_section}.nrPciFreq")"
-	uci_nrPciLockScs="$(uci -q get "sim.${uci_section}.nrPciScs")"
+	uci_nrPciLockEnable="$(uci -q get "sim.${interface}.nrPciLock")"
+	uci_nrPciLockPcid="$(uci -q get "sim.${interface}.nrPciPcid")"
+	uci_nrPciLockBand="$(uci -q get "sim.${interface}.nrPciBand")"
+	uci_nrPciLockFreq="$(uci -q get "sim.${interface}.nrPciFreq")"
+	uci_nrPciLockScs="$(uci -q get "sim.${interface}.nrPciScs")"
 
 	json_add_object nrfreqlock
 	if [ "$uci_nrPciLockEnable" = "true" ] && [ -n "$uci_nrPciLockPcid" ] && [ -n "$uci_nrPciLockBand" ] && [ -n "$uci_nrPciLockFreq" ] && [ -n "$uci_nrPciLockScs" ]; then
@@ -278,10 +265,10 @@ proto_ncm_setup() {
 	json_close_object
 
 	# LTE锁PCI小区配置
-	uci_ltePciLockEnable="$(uci -q get "sim.${uci_section}.ltePciLock")"
-	uci_ltePciLockPcid="$(uci -q get "sim.${uci_section}.ltePciPcid")"
-	uci_ltePciLockBand="$(uci -q get "sim.${uci_section}.ltePciBand")"
-	uci_ltePciLockFreq="$(uci -q get "sim.${uci_section}.ltePciFreq")"
+	uci_ltePciLockEnable="$(uci -q get "sim.${interface}.ltePciLock")"
+	uci_ltePciLockPcid="$(uci -q get "sim.${interface}.ltePciPcid")"
+	uci_ltePciLockBand="$(uci -q get "sim.${interface}.ltePciBand")"
+	uci_ltePciLockFreq="$(uci -q get "sim.${interface}.ltePciFreq")"
 
 	json_add_object ltefreqlock
 	if [ "$uci_ltePciLockEnable" = "true" ] && [ -n "$uci_ltePciLockPcid" ] && [ -n "$uci_ltePciLockBand" ] && [ -n "$uci_ltePciLockFreq" ]; then
