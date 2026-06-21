@@ -53,7 +53,7 @@ proto_ncm_init_config() {
 	# 添加默认配置项
 	proto_config_add_defaults
 
-	logger -t "NCM" "$FUNCNAME Exit proto_ncm_init_config"
+	logger -t "NCM" "<${ifname}:${device}> $FUNCNAME Exit proto_ncm_init_config"
 }
 
 
@@ -117,7 +117,7 @@ proto_ncm_setup() {
 		return 1
 	}
 
-	logger -t "NCM" "interface:${interface} device:${device}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device}"
 
 	# 接口真实名称,如: eth1 eth2
 	[ -z "$ifname" ] && {
@@ -163,7 +163,7 @@ proto_ncm_setup() {
 	# 开始获取调制解调器制造商信息的循环
 	# 记录开始时间
 	start=$(date '+%F %T')
-	logger -t "NCM" "start dial at ${start}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} start dial at ${start}"
 
 	# 拨号配置参数
 	. /usr/share/libubox/jshn.sh
@@ -172,7 +172,7 @@ proto_ncm_setup() {
 	# 设置入网方式
 	local net=$(uci -q get sim.${interface}.net)
 	net=$(echo ${net} | tr 'A-Z' 'a-z')
-	logger -t "NCM" "uci sim net:${net}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim net:${net}"
 	local json_rat
 	case "${net}" in
 		"auto")
@@ -188,12 +188,12 @@ proto_ncm_setup() {
 			json_add_string rat "lte"
 			;;
 		*)
-			logger -t "NCM" "unknown net:${net}! set auto..."
+			logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} unknown net:${net}! set auto..."
 			json_add_string rat "sa+nsa"
 
 			net=auto
 			uci set sim.${interface}.net=auto && uci commit sim
-			logger -t "NCM" "uci set sim.${interface}.net=auto && uci commit sim"
+			logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci set sim.${interface}.net=auto && uci commit sim"
 			;;
 	esac
 
@@ -201,7 +201,7 @@ proto_ncm_setup() {
 	local uci_apn=$(uci -q get sim.${interface}.apn)
 	json_add_string apn "${uci_apn}"
 
-	logger -t "NCM" "uci sim apn:${uci_apn}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim apn:${uci_apn}"
 	
 	# 设置鉴权
 	uci_auth=$(uci -q get sim.${interface}.auth)
@@ -209,9 +209,9 @@ proto_ncm_setup() {
 	uci_password=$(uci -q get sim.${interface}.passwd)
 
 	uci_auth=$(echo ${uci_auth} | tr 'A-Z' 'a-z')
-	logger -t "NCM" "uci sim auth:${uci_auth}"
-	logger -t "NCM" "uci sim username:${uci_username}"
-	logger -t "NCM" "uci sim password:${uci_password}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim auth:${uci_auth}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim username:${uci_username}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim password:${uci_password}"
 
 	# local AUTH
 	case "${uci_auth}" in
@@ -289,7 +289,7 @@ proto_ncm_setup() {
 	json_close_object
 
 	DIAL_PARAMS="$(json_dump)"
-	logger -t "NCM" "dial params: ${DIAL_PARAMS}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} dial params: ${DIAL_PARAMS}"
 
 	# 拨号
 	dial=$(/usr/share/modemdata/dial.sh ${device} "${DIAL_PARAMS}")
@@ -300,17 +300,17 @@ proto_ncm_setup() {
 
 	res="$(udhcpc -i "$ifname" -t 5 -T 3 -n -q 2>&1)"
 	printf '%s\n' "$res" | while IFS= read -r line; do
-	[ -n "$line" ] && logger -t "NCM" "$line"
+	[ -n "$line" ] && logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} $line"
 	done
 
 	ip="$(echo "$res" | awk '/lease of/ {print $4; exit}')"
 	mask="$(echo "$res" | awk '/ip addr add/ {split($5,a,"/"); print a[2]; exit}')"
 	gw="$(echo "$res" | sed -n 's/.*setting default routers:[[:space:]]*//p' | awk '{print $1; exit}')"
-	logger -t "NCM" "${ifname} ip:${ip} mask:${mask} gw:${gw}"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} ip:${ip} mask:${mask} gw:${gw}"
 	
 	# 设置网络接口
 	echo "Setting up $ifname"
-	logger -t "NCM" "Setting up $ifname"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Setting up $ifname"
 	# 初始化接口更新（启用）
 	proto_init_update "$ifname" 1
 	# 开始添加协议数据
@@ -326,7 +326,7 @@ proto_ncm_setup() {
 	local zone="$(fw3 -q network "$interface" 2>/dev/null)"
 
 	# 如果PDP类型支持IPv4则创建IPv4接口
-	logger -t "NCM" "pdptype=${pdptype}!"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} pdptype=${pdptype}!"
 	[ "$pdptype" = "IP" -o "$pdptype" = "IPV4V6" ] && {
 
 		# 初始化JSON
@@ -377,7 +377,7 @@ proto_ncm_setup() {
 		ubus call network add_dynamic "$(json_dump)"
 	}
 
-	logger -t "NCM" "$FUNCNAME Exit proto_ncm_setup, interface:$1"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Exit proto_ncm_setup"
 	sleep 5
 }
 
@@ -386,7 +386,7 @@ proto_ncm_teardown() {
 
 
 	local interface="$1"
-	logger -t "NCM" "$FUNCNAME Enter teardown, interface:$1"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Enter teardown"
 	
 	sleep 1
 
@@ -396,7 +396,7 @@ proto_ncm_teardown() {
 	# 发送接口更新
 	proto_send_update "$interface"
 
-	logger -t "NCM" "$FUNCNAME Exit teardown, interface:$1"
+	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Exit teardown"
 }
 
 # 如果不是仅包含模式则注册NCM协议
