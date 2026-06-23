@@ -10,6 +10,7 @@
 	. /lib/functions.sh
 	# 加载网络接口守护进程协议处理函数
 	. ../netifd-proto.sh
+
 	# 初始化协议处理器
 	logger -t "NCM" "$@"
 	init_proto "$@"
@@ -56,6 +57,34 @@ proto_ncm_init_config() {
 	logger -t "NCM" "<${ifname}:${device}> $FUNCNAME Exit proto_ncm_init_config"
 }
 
+ncm_mask2prefix() {
+	local mask="$1"
+	local prefix=0
+	local octet old_ifs
+
+	old_ifs="$IFS"
+	IFS=.
+	set -- $mask
+	IFS="$old_ifs"
+
+	for octet in "$@"; do
+		case "$octet" in
+			255) prefix=$((prefix + 8)) ;;
+			254) prefix=$((prefix + 7)) ;;
+			252) prefix=$((prefix + 6)) ;;
+			248) prefix=$((prefix + 5)) ;;
+			240) prefix=$((prefix + 4)) ;;
+			224) prefix=$((prefix + 3)) ;;
+			192) prefix=$((prefix + 2)) ;;
+			128) prefix=$((prefix + 1)) ;;
+			0) ;;
+			*) return 1 ;;
+		esac
+	done
+
+	echo "$prefix"
+}
+
 
 # NCM协议连接建立函数
 proto_ncm_setup() {
@@ -63,14 +92,15 @@ proto_ncm_setup() {
 	logger -t "NCM" "Enter proto_ncm_setup"
 
 	# 获取接口名称参数
-	local interface="$1"
-	logger -t "NCM" "interface:${interface}"
+	local ifname="$1"
+	logger -t "NCM" "ifname:${ifname}"
 
 	# 声明本地变量用于存储调制解调器相关信息
 	local manufacturer devname devpath ifpath
+	local ip mask gw prefix
 
-	local device ifname apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
-	json_get_vars device ifname apn auth username password pincode delay mode pdptype sourcefilter delegate profile $PROTO_DEFAULT_OPTIONS
+	local device apn auth username password pincode delay mode pdptype profile $PROTO_DEFAULT_OPTIONS
+	json_get_vars device apn auth username password pincode delay mode pdptype sourcefilter delegate profile $PROTO_DEFAULT_OPTIONS
 
 	local context_type
 
@@ -80,239 +110,126 @@ proto_ncm_setup() {
 	[ -n "$profile" ] || profile=1
 	# logger -t "NCM" "profile:${profile}"
 
-	# /dev/ttyUSB验证
-	# 根据sysfs中的USB设备路径, 获取真实的网口名称和拨号节点
-	local sysfs_base=$(uci -q get sim.${interface}.usb)	# 如:/sys/devices/platform/scb/fe9c0000.xhci/usb3/3-1/3-1.1
-	# 路径不存在
-	[ ! -d "${sysfs_base}" ] && {
-		logger -t "NCM" "interface:${interface} sysfs:${sysfs_base} does not exist! "
-		proto_set_available "$interface" 0
+	# 检查sysfs中是否已有模组对应信息
+	config_load sim
+    config_get sysfs "$ifname" usb
+	[ -z "$sysfs" ] && {
+		logger -t "NCM" "$ifname sysfs is not defined! (uci get sim.$ifname.usb)" 
+		proto_set_available "$ifname" 0
+		return 1
+	}
+    [ ! -d "$sysfs" ] && {
+		logger -t "NCM" "$ifname sysfs is not exist! sysfs:${sysfs}" 
 		return 1
 	}
 
-	logger -t "NCM" "interface:${interface} base sysfs: ${sysfs_base}"
+	logger -t "NCM" "$ifname sysfs:${sysfs}"
 
 	# 获取ttyUSB名称
-	local uci_ttyUSB=$(uci -q get sim.${interface}.ttyUSB)
-	local sysfs_ttyusb=$(readlink -f ${sysfs_base}/${uci_ttyUSB}/ttyUSB*)
-	[ -z "${sysfs_ttyusb}" ] && {
-		logger -t "NCM" "interface:${interface} ttyUSB in sysfs does not exist! "
-		proto_set_available "$interface" 0
+	config_get ttyUSB "$ifname" ttyUSB
+	[ -z "$ttyUSB" ] && {
+		logger -t "NCM" "$ifname ttyUSB is not defined! (uci get sim.$ifname.ttyUSB)"
+		proto_set_available "$ifname" 0
 		return 1
 	}
-	[ ! -d "${sysfs_ttyusb}" ] && {
-		logger -t "NCM" "interface:${interface} ttyUSB sysfs:${sysfs_ttyusb} does not exist! "
-		proto_set_available "$interface" 0
+	[ ! -d "$sysfs/$ttyUSB" ] && {
+		logger -t "NCM" "$ifname ttyUSB sysfs path is not exist! $sysfs/$ttyUSB"
+		proto_set_available "$ifname" 0
 		return 1
 	}
-	
-	logger -t "NCM" "interface:${interface} tty sysfs: ${sysfs_ttyusb}"
-
-	# 获取设备的真实路径
-	device="/dev/$(basename ${sysfs_ttyusb})"
-	# 检查设备是否存在
-	[ -e "$device" ] || {
-		logger -t "NCM" "Control device does not valid"
-		proto_set_available "$interface" 0
+	ttyUSB=$(ls "$sysfs/$ttyUSB" | grep ttyUSB)
+	[ -z "$ttyUSB" ] && {
+		logger -t "NCM" "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
+		proto_set_available "$ifname" 0
 		return 1
 	}
-
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device}"
+	ttyUSB="/dev/${ttyUSB}"
+	logger -t "NCM" "$ifname $ttyUSB"
 
 	# 接口真实名称,如: eth1 eth2
-	[ -z "$ifname" ] && {
-		devname="$(basename "$device")"
-
-		# 根据设备名称类型确定网络接口路径
-		case "$devname" in
-		# ACM类型设备
-		'ttyACM'*)
-			devpath="$(readlink -f /sys/class/tty/$devname/device)"
-			ifpath="$devpath/../*/net"
-			;;
-		# TTY类型设备
-		'tty'*)
-			devpath="$(readlink -f /sys/class/tty/$devname/device)"
-			ifpath="$devpath/../../*/net"
-			;;
-		# 其他USB设备
-		*)
-			devpath="$(readlink -f /sys/class/usbmisc/$devname/device/)"
-			ifpath="$devpath/net"
-			;;
-		esac
-		# 获取网络接口名称
-		ifname="$(ls $(ls -1 -d $ifpath | head -n 1))"
-	}
-
-	# 检查是否成功获取接口名称
-	[ -n "$ifname" ] || {
-		logger -t "NCM" "The interface could not be found."
-		proto_notify_error "$interface" NO_IFACE
-		proto_set_available "$interface" 0
-		
-		sleep 5
+	interface=$(ls "$sysfs"/*/net/ 2>/dev/null)
+	[ -z "$interface" ] && {
+		logger -t "NCM" "$ifname can not find interface in ${sysfs}"
 		return 1
 	}
 
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device}"
+	logger -t "NCM" "$ifname $ttyUSB $interface"
 
-    local sysfs_usb=$(find /sys/devices/platform -name $(basename $device) | head -n 1 | awk -F'/' '{print $(NF-1)}')
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} usb:${sysfs_usb}"
+	# 检查是否成功获取接口名称
+	[ -n "$interface" ] || {
+		logger -t "NCM" "The interface could not be found."
+		proto_notify_error "$ifname" NO_IFACE
+		proto_set_available "$ifname" 0		
+		return 1
+	}
 
-	# 开始获取调制解调器制造商信息的循环
-	# 记录开始时间
-	start=$(date '+%F %T')
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} start dial at ${start}"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device}"
 
-	# 拨号配置参数
-	. /usr/share/libubox/jshn.sh
-	json_init
+	# 获取模组的VID:PID
+	VID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idVendor)
+    [ -z "$VID" ] && { 
+		logger -t "NCM" "ifname:${ifname} unknown Vendor! "
+		return 1
+	}
+	PID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idProduct)
+    [ -z "$PID" ] && {
+		logger -t "NCM" "ifname:${ifname} unknown Product! "
+		return 1
+	}
 
-	# 设置入网方式
-	local net=$(uci -q get sim.${interface}.net)
-	net=$(echo ${net} | tr 'A-Z' 'a-z')
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim net:${net}"
-	local json_rat
-	case "${net}" in
-		"auto")
-			json_add_string rat "sa+nsa"
-			;;
-		"sa")
-			json_add_string rat "sa"
-			;;
-		"nsa")
-			json_add_string rat "nsa"
-			;;
-		"lte")
-			json_add_string rat "lte"
-			;;
-		*)
-			logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} unknown net:${net}! set auto..."
-			json_add_string rat "sa+nsa"
+	logger -t "NCM" "ifname:${ifname} VID:PID=$VID:$PID"
 
-			net=auto
-			uci set sim.${interface}.net=auto && uci commit sim
-			logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci set sim.${interface}.net=auto && uci commit sim"
-			;;
-	esac
+	# 根据VID:PID加载对应的AT指令脚本
+	[ ! -z ${VID} ] && [ ! -z ${PID} ] && {
+		ATCMD_FILE=/usr/share/omr/lib/${VID}${PID}.sh
+		[ ! -f ${ATCMD_FILE} ] && {
+			logger -t "NCM" "ifname:${ifname} ${ATCMD_FILE} is not exist!"
+			return 1
+		}
 
-	# 设置APN
-	local uci_apn=$(uci -q get sim.${interface}.apn)
-	json_add_string apn "${uci_apn}"
+		logger -t "NCM" "ifname:${ifname} ${ATCMD_FILE}"
 
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim apn:${uci_apn}"
-	
-	# 设置鉴权
-	uci_auth=$(uci -q get sim.${interface}.auth)
-	uci_username=$(uci -q get sim.${interface}.user)
-	uci_password=$(uci -q get sim.${interface}.passwd)
+		. ${ATCMD_FILE}
+	}
 
-	uci_auth=$(echo ${uci_auth} | tr 'A-Z' 'a-z')
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim auth:${uci_auth}"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim username:${uci_username}"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} uci sim password:${uci_password}"
+	# 模组初始化
+	atcmd_init
 
-	# local AUTH
-	case "${uci_auth}" in
-		"none")
-			json_add_string auth "none"
-			;;
-		"pap")
-			json_add_string auth "pap"
-			;;
-		"chap")
-			json_add_string auth "chap"
-			;;
-		"auto")
-			json_add_string auth "auto"
-			;;
-		*)
-			json_add_string auth "none"
-			;;
-	esac
-
-	json_add_string passwd "$uci_password"
-	json_add_string username "$uci_username"
-
-
-	# NR锁PCI小区配置
-	uci_nrPciLockEnable="$(uci -q get "sim.${interface}.nrPciLock")"
-	uci_nrPciLockPcid="$(uci -q get "sim.${interface}.nrPciPcid")"
-	uci_nrPciLockBand="$(uci -q get "sim.${interface}.nrPciBand")"
-	uci_nrPciLockFreq="$(uci -q get "sim.${interface}.nrPciFreq")"
-	uci_nrPciLockScs="$(uci -q get "sim.${interface}.nrPciScs")"
-
-	json_add_object nrfreqlock
-	if [ "$uci_nrPciLockEnable" = "true" ] && [ -n "$uci_nrPciLockPcid" ] && [ -n "$uci_nrPciLockBand" ] && [ -n "$uci_nrPciLockFreq" ] && [ -n "$uci_nrPciLockScs" ]; then
-		# band_num="$(echo "$uci_nrPciLockBand" | sed 's/^[nN]//')"
-		json_add_int operatetype 2
-		json_add_array band
-		json_add_int "" "$uci_nrPciLockBand"
-		json_close_array
-		json_add_array arfcn
-		json_add_int "" "$uci_nrPciLockFreq"
-		json_close_array
-		json_add_array scstype
-		json_add_int "" "$uci_nrPciLockScs"
-		json_close_array
-		json_add_array pci
-		json_add_int "" "$uci_nrPciLockPcid"
-		json_close_array
-	else
-		json_add_int operatetype 0
+	# 拨号成功则进行DHCP
+	if ! atcmd_dial; then
+		return 1
 	fi
-	json_close_object
-
-	# LTE锁PCI小区配置
-	uci_ltePciLockEnable="$(uci -q get "sim.${interface}.ltePciLock")"
-	uci_ltePciLockPcid="$(uci -q get "sim.${interface}.ltePciPcid")"
-	uci_ltePciLockBand="$(uci -q get "sim.${interface}.ltePciBand")"
-	uci_ltePciLockFreq="$(uci -q get "sim.${interface}.ltePciFreq")"
-
-	json_add_object ltefreqlock
-	if [ "$uci_ltePciLockEnable" = "true" ] && [ -n "$uci_ltePciLockPcid" ] && [ -n "$uci_ltePciLockBand" ] && [ -n "$uci_ltePciLockFreq" ]; then
-		# band_num="$(echo "$uci_ltePciLockBand" | sed 's/^[nN]//')"
-		json_add_int operatetype 2
-		json_add_array band
-		json_add_int "" "$uci_ltePciLockBand"
-		json_close_array
-		json_add_array arfcn
-		json_add_int "" "$uci_ltePciLockFreq"
-		json_close_array
-		json_add_array pci
-		json_add_int "" "$uci_ltePciLockPcid"
-		json_close_array
-	else
-		json_add_int operatetype 0
-	fi
-	json_close_object
-
-	DIAL_PARAMS="$(json_dump)"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} dial params: ${DIAL_PARAMS}"
-
-	# 拨号
-	dial=$(/usr/share/modemdata/dial.sh ${device} "${DIAL_PARAMS}")
-	echo ${dial}
 
 	# 执行dhcp, 最多尝试15秒
-	ifconfig $ifname up
-
-	res="$(udhcpc -i "$ifname" -t 5 -T 3 -n -q 2>&1)"
+	ifconfig ${interface} up
+	res="$(udhcpc -i "$interface" -t 5 -T 3 -n -q 2>&1)"
 	printf '%s\n' "$res" | while IFS= read -r line; do
-	[ -n "$line" ] && logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} $line"
+		[ -n "$line" ] && logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} $line"
 	done
 
 	ip="$(echo "$res" | awk '/lease of/ {print $4; exit}')"
 	mask="$(echo "$res" | awk '/ip addr add/ {split($5,a,"/"); print a[2]; exit}')"
 	gw="$(echo "$res" | sed -n 's/.*setting default routers:[[:space:]]*//p' | awk '{print $1; exit}')"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} ip:${ip} mask:${mask} gw:${gw}"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} ip:${ip} mask:${mask} gw:${gw}"
+	[ -n "$ip" ] || {
+		logger -t "NCM" "ifname:${ifname} interface:${interface} DHCP did not return IPv4 address"
+		proto_notify_error "$ifname" NO_CARRIER
+		return 1
+	}
+	prefix="$(ncm_mask2prefix "$mask" 2>/dev/null)"
+	[ -n "$prefix" ] || {
+		logger -t "NCM" "ifname:${ifname} interface:${interface} invalid netmask:${mask}"
+		proto_notify_error "$ifname" NO_CARRIER
+		return 1
+	}
 	
 	# 设置网络接口
 	echo "Setting up $ifname"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Setting up $ifname"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} Setting up $ifname"
 	# 初始化接口更新（启用）
-	proto_init_update "$ifname" 1
+	proto_init_update "$interface" 1
+	proto_add_ipv4_address "$ip" "$prefix"
+	[ -n "$gw" ] && proto_add_ipv4_route "0.0.0.0" 0 "$gw"
 	# 开始添加协议数据
 	proto_add_data
 	# 添加制造商信息
@@ -320,73 +237,19 @@ proto_ncm_setup() {
 	# 结束数据添加
 	proto_close_data
 	# 发送接口更新
-	proto_send_update "$interface"
+	proto_send_update "$ifname"
 
-	# 获取防火墙区域信息
-	local zone="$(fw3 -q network "$interface" 2>/dev/null)"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} pdptype=${pdptype}"
 
-	# 如果PDP类型支持IPv4则创建IPv4接口
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} pdptype=${pdptype}!"
-	[ "$pdptype" = "IP" -o "$pdptype" = "IPV4V6" ] && {
-
-		# 初始化JSON
-		json_init
-		# 添加IPv4接口名称
-		json_add_string name "${interface}_4"
-		# 添加接口引用
-		json_add_string ifname "@$interface"
-		# 设置协议为DHCP
-		json_add_string proto "dhcp"
-		# 添加动态默认配置
-		proto_add_dynamic_defaults
-		# 如果有防火墙区域，则添加防火墙区域配置
-		[ -n "$zone" ] && {
-			json_add_string zone "$zone"
-		}
-		# 关闭JSON对象
-		json_close_object
-		# 通过ubus添加动态网络接口
-		ubus call network add_dynamic "$(json_dump)"
-	}
-
-	# 如果PDP类型支持IPv6则创建IPv6接口
-	[ "$pdptype" = "IPV6" -o "$pdptype" = "IPV4V6" ] && {
-		# 初始化JSON
-		json_init
-		# 添加IPv6接口名称
-		json_add_string name "${interface}_6"
-		# 添加接口引用
-		json_add_string ifname "@$interface"
-		# 设置协议为DHCPv6
-		json_add_string proto "dhcpv6"
-		# 启用前缀扩展
-		json_add_string extendprefix 1
-		# 如果禁用委托则设置
-		[ "$delegate" = "0" ] && json_add_boolean delegate "0"
-		# 如果禁用源过滤则设置
-		[ "$sourcefilter" = "0" ] && json_add_boolean sourcefilter "0"
-		# 添加动态默认配置
-		proto_add_dynamic_defaults
-		# 如果有防火墙区域
-		[ -n "$zone" ] && {
-			json_add_string zone "$zone"
-		}
-		# 关闭JSON对象
-		json_close_object
-		# 通过ubus添加动态网络接口
-		ubus call network add_dynamic "$(json_dump)"
-	}
-
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Exit proto_ncm_setup"
-	sleep 5
+	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Exit proto_ncm_setup"
 }
 
 # NCM协议连接断开函数
 proto_ncm_teardown() {
 
 
-	local interface="$1"
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Enter teardown"
+	local ifname="$1"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Enter teardown"
 	
 	sleep 1
 
@@ -394,9 +257,9 @@ proto_ncm_teardown() {
 	# 初始化接口更新（禁用所有）
 	proto_init_update "*" 0
 	# 发送接口更新
-	proto_send_update "$interface"
+	proto_send_update "$ifname"
 
-	logger -t "NCM" "interface:${interface} ifname:${ifname} device:${device} Exit teardown"
+	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Exit teardown"
 }
 
 # 如果不是仅包含模式则注册NCM协议
