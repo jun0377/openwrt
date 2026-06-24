@@ -167,7 +167,7 @@ proto_ncm_setup() {
     config_get sysfs "$ifname" usb
 	[ -z "$sysfs" ] && {
 		logger -t "NCM" "$ifname sysfs is not defined! (uci get sim.$ifname.usb)" 
-		proto_set_available "$ifname" 0
+		# proto_set_available "$ifname" 0
 		return 1
 	}
     [ ! -d "$sysfs" ] && {
@@ -181,18 +181,18 @@ proto_ncm_setup() {
 	config_get ttyUSB "$ifname" ttyUSB
 	[ -z "$ttyUSB" ] && {
 		logger -t "NCM" "$ifname ttyUSB is not defined! (uci get sim.$ifname.ttyUSB)"
-		proto_set_available "$ifname" 0
+		# proto_set_available "$ifname" 0
 		return 1
 	}
 	[ ! -d "$sysfs/$ttyUSB" ] && {
 		logger -t "NCM" "$ifname ttyUSB sysfs path is not exist! $sysfs/$ttyUSB"
-		proto_set_available "$ifname" 0
+		# proto_set_available "$ifname" 0
 		return 1
 	}
 	ttyUSB=$(ls "$sysfs/$ttyUSB" | grep ttyUSB)
 	[ -z "$ttyUSB" ] && {
 		logger -t "NCM" "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
-		proto_set_available "$ifname" 0
+		# proto_set_available "$ifname" 0
 		return 1
 	}
 	ttyUSB="/dev/${ttyUSB}"
@@ -210,8 +210,8 @@ proto_ncm_setup() {
 	# 检查是否成功获取接口名称
 	[ -n "$interface" ] || {
 		logger -t "NCM" "The interface could not be found."
-		proto_notify_error "$ifname" NO_IFACE
-		proto_set_available "$ifname" 0		
+		# proto_notify_error "$ifname" NO_IFACE
+		# proto_set_available "$ifname" 0		
 		return 1
 	}
 
@@ -244,7 +244,7 @@ proto_ncm_setup() {
 		# 保存变量, 避免source ATCMD脚本时被顶层的赋值语句清空
 		local _saved_ttyUSB="$ttyUSB"
 		local _saved_interface="$interface"
-		. ${ATCMD_FILE}
+		. ${ATCMD_FILE} $ifname
 		ttyUSB="$_saved_ttyUSB"
 		interface="$_saved_interface"
 	}
