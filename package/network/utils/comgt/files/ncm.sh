@@ -85,6 +85,55 @@ ncm_mask2prefix() {
 	echo "$prefix"
 }
 
+# 停止track-sim procd实例
+function sim_procd_stop()
+{
+	local ifname="$1"
+	[ -n "$ifname" ] || return 1
+
+	. /lib/functions/service.sh
+
+	local service_name="tracker-sim-${ifname}"
+	local pid_file="/var/run/${service_name}.pid"
+
+	local SERVICE_NAME="$service_name"
+	local SERVICE_PID_FILE="$pid_file"
+	local SERVICE_USE_PID=1
+	local SERVICE_MATCH_EXEC=
+
+	if service_check /bin/tracker-sim "$ifname"; then
+		logger -t "NCM" "stop ${service_name}"
+		service_stop /bin/tracker-sim "$ifname"
+		rm -f "$pid_file"
+	fi
+}
+
+# 创建track-sim procd实例
+function sim_procd_start()
+{
+	local ifname="$1"
+	[ -n "$ifname" ] || return 1
+
+	. /lib/functions/service.sh
+
+	local service_name="tracker-sim-${ifname}"
+	local pid_file="/var/run/${service_name}.pid"
+
+	local SERVICE_NAME="$service_name"
+	local SERVICE_PID_FILE="$pid_file"
+	local SERVICE_DAEMONIZE=1
+	local SERVICE_WRITE_PID=1
+	local SERVICE_USE_PID=
+	local SERVICE_MATCH_EXEC=
+
+	if service_check /bin/tracker-sim "$ifname"; then
+		logger -t "NCM" "${service_name} already running"
+		return 0
+	fi
+
+	logger -t "NCM" "start ${service_name}"
+	service_start /bin/tracker-sim "$ifname"
+}
 
 # NCM协议连接建立函数
 proto_ncm_setup() {
@@ -94,6 +143,9 @@ proto_ncm_setup() {
 	# 获取接口名称参数
 	local ifname="$1"
 	logger -t "NCM" "ifname:${ifname}"
+
+	# 停止tracker-sim进程, 避免AT指令串口竞争
+	[ ! -z "${ifname}" ] && sim_procd_stop $ifname
 
 	# 声明本地变量用于存储调制解调器相关信息
 	local manufacturer devname devpath ifpath
@@ -189,16 +241,26 @@ proto_ncm_setup() {
 
 		logger -t "NCM" "ifname:${ifname} ${ATCMD_FILE}"
 
+		# 保存变量, 避免source ATCMD脚本时被顶层的赋值语句清空
+		local _saved_ttyUSB="$ttyUSB"
+		local _saved_interface="$interface"
 		. ${ATCMD_FILE}
+		ttyUSB="$_saved_ttyUSB"
+		interface="$_saved_interface"
 	}
 
 	# 模组初始化
-	atcmd_init
+	atcmd_init ${ttyUSB}
 
 	# 拨号成功则进行DHCP
-	if ! atcmd_dial; then
+	# 拨号失败时退出并启动tracker-sim进程, 监控何时可以重新拨号
+	if ! atcmd_dial ${ttyUSB}; then
+		sim_procd_start ${ifname}
 		return 1
 	fi
+
+	# 启动tracker-sim, 进行状态监控
+	sim_procd_start ${ifname}
 
 	# 执行dhcp, 最多尝试15秒
 	ifconfig ${interface} up
@@ -246,7 +308,6 @@ proto_ncm_setup() {
 
 # NCM协议连接断开函数
 proto_ncm_teardown() {
-
 
 	local ifname="$1"
 	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Enter teardown"
