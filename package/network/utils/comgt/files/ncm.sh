@@ -252,12 +252,26 @@ proto_ncm_setup() {
 	# 模组初始化
 	atcmd_init ${ttyUSB}
 
+	# 模组未使能,直接退出并不再重新尝试拨号, uci get sim.sim1.enable
+	local enable=$(uci -q get sim.$ifname.enable)
+	[ -n "$enable" ] && [ "$enable" != "1" ] && [ "$enable" != "true" ] && {
+		logger -t "NCM" "ifname:${ifname} sim is disabled by user, exit"
+		sim_procd_start "${ifname}"
+		proto_block_restart "$ifname"
+		return 1
+	}
+
+	logger -t "NCM" "ifname:${ifname} before atcmd_dial"
+
 	# 拨号成功则进行DHCP
 	# 拨号失败时退出并启动tracker-sim进程, 监控何时可以重新拨号
 	if ! atcmd_dial ${ttyUSB}; then
+		logger -t "NCM" "ifname:${ifname} atcmd_dial failed!"
 		sim_procd_start ${ifname}
 		return 1
 	fi
+
+	logger -t "NCM" "ifname:${ifname} after atcmd_dial"
 
 	# 启动tracker-sim, 进行状态监控
 	sim_procd_start ${ifname}
@@ -300,8 +314,6 @@ proto_ncm_setup() {
 	proto_close_data
 	# 发送接口更新
 	proto_send_update "$ifname"
-
-	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} pdptype=${pdptype}"
 
 	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Exit proto_ncm_setup"
 }
