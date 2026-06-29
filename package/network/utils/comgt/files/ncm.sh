@@ -268,6 +268,7 @@ proto_ncm_setup() {
 	if ! atcmd_dial ${ttyUSB}; then
 		logger -t "NCM" "ifname:${ifname} atcmd_dial failed!"
 		sim_procd_start ${ifname}
+		sleep 20
 		return 1
 	fi
 
