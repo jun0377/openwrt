@@ -1,9 +1,12 @@
 #!/bin/sh /etc/rc.common
 # Copyright (C) 2006-2011 OpenWrt.org
 
+# OpenWrt 系统最早执行的用户态初始化脚本(START=10), 负责完成从内核启动到用户态就绪的关键过渡
+
 START=10
 STOP=90
 
+# 执行/etc/uci-defaults目录下的脚本,生成或修改默认uci配置文件
 uci_apply_defaults() {
 	. /lib/functions/system.sh
 
@@ -17,9 +20,11 @@ uci_apply_defaults() {
 }
 
 boot() {
+	# 挂载根文件系统
 	[ -f /proc/mounts ] || /sbin/mount_root
 	[ -f /proc/jffs2_bbc ] && echo "S" > /proc/jffs2_bbc
 
+	# 创建运行时目录
 	mkdir -p /var/lock
 	chmod 1777 /var/lock
 	mkdir -p /var/log
@@ -32,17 +37,25 @@ boot() {
 	chmod 0700 /tmp/.uci
 	touch /var/log/wtmp
 	touch /var/log/lastlog
+	
+	# DNS 临时环境
 	mkdir -p /tmp/resolv.conf.d
 	touch /tmp/resolv.conf.d/resolv.conf.auto
 	ln -sf /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf
+	
+	# 挂载内核调试、BPF 和 pstore 持久存储文件系统
 	grep -q debugfs /proc/filesystems && /bin/mount -o nosuid,nodev,noexec,noatime -t debugfs debugfs /sys/kernel/debug
 	grep -q bpf /proc/filesystems && /bin/mount -o nosuid,nodev,noexec,noatime,mode=0700 -t bpf bpffs /sys/fs/bpf
 	grep -q pstore /proc/filesystems && /bin/mount -o nosuid,nodev,noexec,noatime -t pstore pstore /sys/fs/pstore
+
+	# 若进入 failsafe 模式，写入标志文件
 	[ "$FAILSAFE" = "true" ] && touch /tmp/.failsafe
 
+	# 标记配置待处理，加载所有内核模块
 	touch /tmp/.config_pending
 	/sbin/kmodloader
 
+	# 无线配置延迟
 	[ ! -f /etc/config/wireless ] && {
 		# compat for bcm47xx and mvebu
 		sleep 1
@@ -50,12 +63,19 @@ boot() {
 
 	mkdir -p /tmp/.uci
 	[ -f /etc/uci-defaults/30_uboot-envtools ] && (. /etc/uci-defaults/30_uboot-envtools)
+
+	# 从 board.json 生成 /etc/config/network 和 /etc/config/system
 	/bin/config_generate
 	rm -f /tmp/.config_pending
+
+	# 检测和配置 WiFi 设备
 	/sbin/wifi config
+
+	# 关键步骤 ：执行所有一次性初始化脚本（包括 1940-omr-dns 、 2000-omr-dhcp 等）
 	uci_apply_defaults
 	sync
 	
 	# temporary hack until configd exists
+	# 触发所有 procd 服务根据新 UCI 配置重新生成运行态配置
 	/sbin/reload_config
 }
