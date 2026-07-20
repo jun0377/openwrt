@@ -1,4 +1,13 @@
 #!/usr/bin/env ucode
+/*
+ * packet-steering.uc — OpenWrt 通用数据包引导 (RPS/RFS) 配置器
+ * 根据 CPU 拓扑和网络设备 NAPI 线程, 自动计算最优的 RPS/RFS 分配策略:
+ *   1. 探测所有物理网络设备和 NAPI 线程
+ *   2. 按负载均衡算法分配 CPU 核心
+ *   3. 写 /sys/class/net/<dev>/queues/<rxq>/rps_cpus 和 rps_flow_cnt
+ *   4. 用 taskset 绑定 NAPI 软中断线程到指定 CPU
+ * 参数: [0|1|2]  [-l <flows>]  [-n dry-run] [-d debug]
+ */
 'use strict';
 import { glob, basename, dirname, readlink, readfile, realpath, writefile, error, open } from "fs";
 
@@ -12,6 +21,12 @@ let cpus;
 let all_cpus;
 let local_flows = 0;
 
+// 解析命令行参数:
+//   -d      调试输出 (可叠加)
+//   -n      dry-run 模式 (只打印, 不实际写入)
+//   0       关闭 packet steering (disable)
+//   2       对所有 CPU 启用 RPS (非仅单核绑定)
+//   -l <n>  设置 RFS 流表大小
 while (length(ARGV) > 0) {
 	let arg = shift(ARGV);
 	switch (arg) {
@@ -33,6 +48,8 @@ while (length(ARGV) > 0) {
 	}
 }
 
+// 读取 /proc/<pid>/status 的 Name 字段, 返回进程名
+// 用于识别 NAPI 线程名 (如 "napi/eth0-0", "mt76-tx phy0")
 function task_name(pid)
 {
 	let stat = open(`/proc/${pid}/status`, "r");
@@ -43,6 +60,8 @@ function task_name(pid)
 	return trim(split(line, "\t", 2)[1]);
 }
 
+// 用 taskset 将指定进程绑定到指定 CPU 核心
+// disable 模式: 绑定到所有 CPU (解除绑核限制)
 function set_task_cpu(pid, cpu) {
 	if (disable)
 		cpu = join(",", map(cpus, (cpu) => cpu.id));
@@ -55,6 +74,8 @@ function set_task_cpu(pid, cpu) {
 		system(`taskset -p -c ${cpu} ${pid}`);
 }
 
+// 将 CPU 编号转为十六进制 CPU 掩码 (写 rps_cpus 用)
+// cpu < 0 表示所有 CPU
 function cpu_mask(cpu)
 {
 	let mask;
@@ -65,6 +86,9 @@ function cpu_mask(cpu)
 	return sprintf("%x", mask);
 }
 
+// 设置网络设备的 RPS/RFS 参数
+// rps_cpus: 哪些 CPU 处理该队列的收包软中断
+// rps_flow_cnt: RFS 流表大小 (硬件流导向)
 function set_netdev_cpu(dev, cpu, rx_queue) {
 	rx_queue ??= "rx-*";
 	let queues = glob(`/sys/class/net/${dev}/queues/${rx_queue}/rps_cpus`);
@@ -86,6 +110,8 @@ function set_netdev_cpu(dev, cpu, rx_queue) {
 	}
 }
 
+// 判断 NAPI 线程名是否属于指定设备
+// 匹配规则: "napi/<dev>-<qid>" 或 "mt76-tx phy<N>"
 function task_device_match(name, device)
 {
 	let napi_match = match(name, /napi\/([^-]*)-\d+/);
@@ -114,6 +140,8 @@ cpus = slice(cpus, 0, 64);
 if (length(cpus) < 2)
 	exit(0);
 
+// 为指定 CPU 增加负载权重
+// 同时给同物理核的 sibling (超线程) 加上 cpu_thread_weight 倍权重
 function cpu_add_weight(cpu_id, weight)
 {
 	let cpu = cpus[cpu_id];
@@ -125,6 +153,8 @@ function cpu_add_weight(cpu_id, weight)
 	}
 }
 
+// 负载均衡核心算法: 选择当前负载最低的 CPU
+// prev_cpu: 上一步选中的 CPU (多队列时避免重复分配到同一个核)
 function get_next_cpu(weight, prev_cpu)
 {
 	if (disable)
@@ -178,6 +208,9 @@ for (let dev in netdevs) {
 	netdev_phys[dev] = pdev;
 }
 
+// 按 CPU 拓扑映射, 跳过虚拟接口 (有 lower_* 的)
+
+// 扫描 /proc/*/exe, 通过 NAPI 线程名匹配将线程归属到对应设备
 for (let path in glob("/proc/*/exe")) {
 	readlink(path);
 	if (error() != "No such file or directory")

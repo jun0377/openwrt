@@ -1,9 +1,34 @@
 #!/bin/sh
+
+# udhcpc 的回调脚本,由 udhcpc 通过 -s /lib/netifd/dhcp.script 参数指定
+# 每次DHCP状态变更时udhcpc会调用此脚本,并将DHCP响应数据通过环境变量传入
+
+#   						DHCP 服务器
+#                              │
+#                    DHCPOFFER / DHCPACK
+#                              │
+#                              ▼
+#                         udhcpc (DHCP 客户端)
+#                              │
+#               ┌── $1=bound ──┼── $1=renew ──┐
+#               ▼              │              ▼
+#         setup_interface      │         setup_interface
+#         (首次获取租约)         │         (续租成功)
+#                              │
+#               $1=deconfig ───┘
+#                    │
+#                    ▼
+#              deconfig_interface
+#              (租约释放/过期)
+
 [ -z "$1" ] && echo "Error: should be run by udhcpc" && exit 1
 
 . /lib/functions.sh
 . /lib/netifd/netifd-proto.sh
 
+# 解析 RFC 3442 无类别静态路由并注册到 netifd
+# 参数由 udhcpc 通过环境变量传入: $staticroutes / $msstaticroutes
+# 格式: <prefix_len> <dest> <gateway> [<prefix_len> <dest> <gateway>...]
 set_classless_routes() {
 	local max=128
 	while [ -n "$1" -a -n "$2" -a $max -gt 0 ]; do
@@ -13,6 +38,10 @@ set_classless_routes() {
 	done
 }
 
+# DHCP 地址获取/续租成功处理: 将 udhcpc 提供的环境变量翻译为 netifd proto 更新
+# 注册 IP 地址、默认网关、静态路由 (RFC 3442)、DNS 服务器、搜索域等
+# 如果 dhcp option 212 返回了 6rd 参数, 还会通过 ubus 动态创建 6rd 隧道接口
+# 所有参数由 udhcpc 通过环境变量传入 ($ip, $subnet, $router, $dns, ...)
 setup_interface () {
 	proto_init_update "*" 1
 	proto_add_ipv4_address "$ip" "${subnet:-255.255.255.0}"
@@ -26,7 +55,9 @@ setup_interface () {
 		local gw_net
 		ipcalc "$i/$mask" && gw_net="$NETWORK"
 
+		# 关键的设计细节: 网关与自身不在同一子网时, 先添加一条 /32 主机路由指向网关
 		[ "$ip_net" != "$gw_net" ] && proto_add_ipv4_route "$i" 32 "" "$ip"
+
 		proto_add_ipv4_route 0.0.0.0 0 "$i" "$ip"
 
 		local r
@@ -97,6 +128,7 @@ setup_interface () {
 	fi
 }
 
+# DHCP 租约释放/过期处理: 通知 netifd 删除地址和路由
 deconfig_interface() {
 	proto_init_update "*" 0
 	proto_send_update "$INTERFACE"
@@ -112,6 +144,7 @@ case "$1" in
 esac
 
 # user rules
+# 用户可在 /etc/udhcpc.user 或 /etc/udhcpc.user.d/ 中放置自定义逻辑，例如根据获取的网关信息动态修改 mwan3 配置、更新 DDNS 等
 [ -f /etc/udhcpc.user ] && . /etc/udhcpc.user "$@"
 for f in /etc/udhcpc.user.d/*; do
 	[ -f "$f" ] && (. "$f" "$@")

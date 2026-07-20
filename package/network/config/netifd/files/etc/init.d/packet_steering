@@ -1,22 +1,36 @@
 #!/bin/sh /etc/rc.common
 
-START=25
-USE_PROCD=1
+# 数据包引导(RPS/RFS)服务
+
+START=25			# 在网络 (20) 之后、防火墙 (30+) 之前启动
+USE_PROCD=1			# 使用 procd 管理
 
 start_service() {
 	reload_service
 }
 
 service_triggers() {
-	procd_add_reload_trigger "network"
-	procd_add_reload_trigger "firewall"
-	procd_add_raw_trigger "interface.*" 1000 /etc/init.d/packet_steering reload
+
+	# 文件变更触发器
+	procd_add_reload_trigger "network"			# network 配置变更 → 自动 reload
+	procd_add_reload_trigger "firewall"			# firewall 配置变更 → 自动 reload
+
+	# ubus 事件触发器, 任何 ubus interface.* 事件（如 interface.wan.up ）都会触发 reload，确保接口上下线后 RPS/RFS 配置重新生效
+	procd_add_raw_trigger "interface.*" 1000 /etc/init.d/packet_steering reload		 # 任何接口状态变更 → reload
 }
 
 reload_service() {
+
+	# 读取 UCI 全局配置
 	packet_steering="$(uci -q get "network.@globals[0].packet_steering")"
 	steering_flows="$(uci -q get "network.@globals[0].steering_flows")"
+
+	# steering_flows > 0 时添加 -l 参数(RFS 流表大小)
 	[ "${steering_flows:-0}" -gt 0 ] && opts="-l $steering_flows"
+
+	# 平台级脚本优先, 否则回退到通用 packet-steering.uc
+	# 平台脚本优先机制: 如果设备厂商提供了packet-steering.sh(针对特定硬件的优化配置), 则使用平台脚本;
+	# 否则使用OpenWrt通用的packet-steering.uc(基于CPU拓扑自动计算RPS/RFS的/sys/class/net/<dev>/queues/rx-*/rps_cpus等sysfs参数)
 	if [ -e "/usr/libexec/platform/packet-steering.sh" ]; then
 		/usr/libexec/platform/packet-steering.sh "$packet_steering"
 	else

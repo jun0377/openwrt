@@ -1,13 +1,19 @@
 #!/bin/sh
-INTERFACE="$1"
 
-[ -n "$INTERFACE" ] || {
+# 查询接口状态
+
+INTERFACE="$1"								# 接口名参数 (如 wan)
+
+[ -n "$INTERFACE" ] || {					# 没传参数 → 显示用法
 	echo "Usage: $0 <interface>"
 	exit 1
 }
 
+# 接口不存在 → 报错
 ubus -S list "network.interface.$INTERFACE" >/dev/null || {
 	echo "Interface $INTERFACE not found"
 	exit 1
 }
+
+# 等价于一步到位的 ubus call network.interface.wan status
 ubus call network.interface status "{ \"interface\" : \"$INTERFACE\" }"

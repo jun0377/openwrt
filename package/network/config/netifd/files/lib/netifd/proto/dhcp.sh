@@ -1,11 +1,15 @@
 #!/bin/sh
 
+# netifd的DHCP协议处理插件, 负责启动/续租/销毁udhcpc(Busybox DHCP 客户端)来获取 IPv4 地址
+
 [ -x /sbin/udhcpc ] || exit 0
 
 . /lib/functions.sh
 . ../netifd-proto.sh
 init_proto "$@"
 
+# 声明 DHCP 协议支持的配置项 (供 netifd 校验和 JSON schema 生成)
+# 含: 静态 IP 强制使用、hostname、clientid、norelease、reqopts、sendopts 等
 proto_dhcp_init_config() {
 	renew_handler=1
 
@@ -27,10 +31,16 @@ proto_dhcp_init_config() {
 	proto_config_add_boolean classlessroute
 }
 
+# 将 sendopts 列表中的每个条目转换为 udhcpc 的 -x 参数
+# 参数: $1 = sendopt 值 (如 "hostname:foo"), $3 = 累积变量名
 proto_dhcp_add_sendopts() {
 	[ -n "$1" ] && append "$3" "-x $1"
 }
 
+# 启动 udhcpc 获取 DHCP 租约
+# 将所有配置项翻译为 udhcpc 命令行参数: -i (接口), -r (固定IP), -x (option),
+#   -O (请求的 option), -R (release), -C (clientid), -B (broadcast) 等
+# 参数: $1 = config section名, $2 = Linux 接口名
 proto_dhcp_setup() {
 	local config="$1"
 	local iface="$2"
@@ -73,6 +83,8 @@ proto_dhcp_setup() {
 		$clientid $defaultreqopts $broadcast $norelease $dhcpopts
 }
 
+# 续租: 向 udhcpc 发送 SIGUSR1 信号触发 lease renew
+# 参数: $1 = config section名
 proto_dhcp_renew() {
 	local interface="$1"
 	# SIGUSR1 forces udhcpc to renew its lease
@@ -80,6 +92,8 @@ proto_dhcp_renew() {
 	[ -n "$sigusr1" ] && proto_kill_command "$interface" $sigusr1
 }
 
+# 销毁 DHCP 客户端: 杀死 udhcpc 进程, 可选发送 release
+# 参数: $1 = config section名
 proto_dhcp_teardown() {
 	local interface="$1"
 	proto_kill_command "$interface"

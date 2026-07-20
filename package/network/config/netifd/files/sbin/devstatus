@@ -1,12 +1,16 @@
 #!/bin/sh
-. /usr/share/libubox/jshn.sh
-DEVICE="$1"
 
-[ -n "$DEVICE" ] || {
+# 查询网络设备状态
+# 这是一个极简的ubus查询封装, 等价于 ifstatus 但对设备级别（而非接口级别）
+
+. /usr/share/libubox/jshn.sh
+DEVICE="$1"							# 设备名参数 (如 eth0, br-lan)
+
+[ -n "$DEVICE" ] || {				# 没传参数 → 显示用法
 	echo "Usage: $0 <device>"
 	exit 1
 }
 
 json_init
-json_add_string name "$DEVICE"
-ubus call network.device status "$(json_dump)"
+json_add_string name "$DEVICE"						# 构建 {"name": "eth0"}
+ubus call network.device status "$(json_dump)"		# 调 ubus 查设备状态

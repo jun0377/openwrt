@@ -1,6 +1,12 @@
 #!/bin/sh
+
+# udhcpc 的内置默认脚本(当 -s 参数未指定时的 fallback)
+# 与netifd的dhcp.script不同, 它直接用 ip addr / route 操作而不是通过 ubus/netifd
+
 [ -z "$1" ] && echo "Error: should be run by udhcpc" && exit 1
 
+# 解析 RFC 3442 无类别静态路由, 直接调用 route add
+# 参数由 udhcpc 环境变量传入: $1 $2 ... 为 <prefix_len> <dest> <gateway> ...
 set_classless_routes() {
 	local max=128
 	local type
@@ -13,6 +19,8 @@ set_classless_routes() {
 	done
 }
 
+# DHCP 地址/路由配置 (直接操作 ip addr / route, 不走 netifd)
+# 环境变量: $ip $subnet $router $staticroutes $msstaticroutes
 setup_interface() {
 	echo "udhcpc: ip addr add $ip/${subnet:-255.255.255.0} broadcast ${broadcast:-+} dev $interface"
 	ip addr add $ip/${subnet:-255.255.255.0} broadcast ${broadcast:-+} dev $interface
@@ -39,6 +47,8 @@ setup_interface() {
 
 
 applied=
+# udhcpc 动作分派: bound/renew → 配置地址, deconfig → 释放地址
+# 最后加载用户钩子 /etc/udhcpc.user
 case "$1" in
 	deconfig)
 		ip -4 addr flush dev "$interface"

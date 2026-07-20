@@ -1,13 +1,22 @@
 . /lib/functions.sh
 
+# UCI 配置迁移脚本, 在系统首次启动或升级后执行一次, 将DHCP接口的option release旧配置迁移到语义翻转的新配置 option norelease
+# OpenWrt 新版 netifd 将 DHCP 的租约释放行为从正面表述改为反面表述:
+# 版本 		配置项 						语义 
+# 旧版 option release '1' 		退出时释放 DHCP 租约 
+# 新版 option norelease '1' 	退出时不释放 DHCP 租约
+
+# 两者是 互斥的反向关系: norelease = !release
+
 migrate_release() {
-	local config="$1"
+	local config="$1"						# $1 = UCI section 名 (如 wan)
 	local proto
 	local release
 
 	config_get proto "$config" proto
 	config_get release "$config" release
 
+	# 仅对 proto=dhcp 且 release 非空的接口执行迁移
 	[ "$proto" = "dhcp" ] && [ -n "$release" ] && {
 		norelease="$((!$release))"
 		uci_set network "$config" norelease "$norelease"
@@ -16,8 +25,8 @@ migrate_release() {
 
 }
 
-config_load network
-config_foreach migrate_release interface
+config_load network							# 加载 /etc/config/network
+config_foreach migrate_release interface	# 遍历所有 config interface 节
 uci commit network
 
 exit 0

@@ -1,10 +1,13 @@
 #!/bin/sh /etc/rc.common
 
+# netifd 服务管理脚本 ，负责启动/停止/重载 netifd 守护进程
+
 START=20
 STOP=90
 
 USE_PROCD=1
 
+# 初始化 switch 硬件 (可被板级脚本 /lib/network 覆盖 setup_switch 定义)
 init_switch() {
 	setup_switch() { return 0; }
 
@@ -12,6 +15,7 @@ init_switch() {
 	setup_switch
 }
 
+# 启动 netifd 守护进程 (procd 管理, respawn 自动重启, watch ubus 事件)
 start_service() {
 	init_switch
 
@@ -25,6 +29,7 @@ start_service() {
 	procd_close_instance
 }
 
+# 重载网络配置: 初始化 switch → ubus call network reload
 reload_service() {
 	local rv=0
 
@@ -33,6 +38,7 @@ reload_service() {
 	return $rv
 }
 
+# 停止网络服务: 关闭 wifi → ifdown 所有接口
 stop_service() {
 	[ -x /sbin/wifi ] && /sbin/wifi down
 	ifdown -a
@@ -108,6 +114,7 @@ validate_rule6_section()
 		'action:or("prohibit", "unreachable", "blackhole", "throw")'
 }
 
+# 验证 switch 设备配置 (platform driver 级别的交换机注册)
 validate_switch_section()
 {
 	uci_validate_section network switch "${1}" \
@@ -119,6 +126,7 @@ validate_switch_section()
 		'ar8xxx_mib_type:range(0,1)'
 }
 
+# 验证 switch VLAN 配置
 validate_switch_vlan()
 {
 	uci_validate_section network switch_vlan "${1}" \
@@ -127,6 +135,8 @@ validate_switch_vlan()
 		'ports:list(ports)'
 }
 
+# 注册配置重载触发器和 UCI 校验规则
+# network/wireless 配置变更时自动 reload, 且通过 validate 函数做合法性校验
 service_triggers()
 {
 	# /etc/config/network /etc/config/wireless 这两个配置文件发生变化时,自动触发此脚本
@@ -143,6 +153,7 @@ service_triggers()
 	procd_close_validate										# 配置文件的合法性校验,关闭验证数组
 }
 
+# 系统关机: 关闭所有网络接口
 shutdown() {
 	ifdown -a													# 关闭所有网络接口
 	sleep 1

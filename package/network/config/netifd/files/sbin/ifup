@@ -1,40 +1,52 @@
 #!/bin/sh
 
-ifup_all=
+# OpenWrt 经典的 双用途脚本 ——通过软链接 ifdown → ifdown 和 ifup → ifdown ，根据调用名决定行为。它是对 netifd ubus 接口的薄封装
 
+ifup_all=										# 初始化为空: "-a" 标志, 决定是批量操作还是单个接口
+
+# 将 $modes 中的每个操作逐个发送给 netifd
 if_call() {
 	local interface="$1"
 	for mode in $modes; do
 		ubus call network.interface $mode "{ \"interface\" : \"$interface\" }"
+		# ubus call network.interface down
+		# ubus call network.interface up
 	done
 }
 
+# $0 = 调用时的脚本名
 case "$0" in
-	*ifdown) modes=down;;
+	*ifdown) modes=down;;					# ifdown → 只下线
 	*ifup)
-		modes="down up"
+		modes="down up"						# ifup   → 先下线再上线 (相当于重启接口)
 	;;
-	*) echo "Invalid command: $0";;
+	*) echo "Invalid command: $0";;			# 其他名字调用 → 报错
 esac
 
+# 无限循环, 解析 -a 标志
 while :; do
 	case "$1" in
 		-a)
-			ifup_all=1
-			shift
+			ifup_all=1						# 设置批量标志
+			shift							# 消费 -a, $1 移到下一个参数
 		;;
 		*)
-			break
+			break							# 遇到非 -a 参数 → 退出循环 (剩下的是接口名)
 		;;
 	esac
 done
 
+# ifup 时（modes = "down up"），先执行 ubus call network reload
+# ifdown 时则跳过此步骤
 [ "$modes" = "down up" ] && ubus call network reload
+
+# -a 批量模式
 if [ -n "$ifup_all" ]; then
 	for interface in $(ubus -S list 'network.interface.*'); do
 		if_call "${interface##network.interface.}"
 	done
 	exit
+# 单个接口模式
 else
 	ubus -S list "network.interface.$1" > /dev/null || {
 		echo "Interface $1 not found"
