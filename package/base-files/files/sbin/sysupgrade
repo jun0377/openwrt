@@ -34,7 +34,7 @@ export IGNORE_MINOR_COMPAT=0
 export FORCE=0
 export CONFFILES=/tmp/sysupgrade.conffiles
 
-# 参数解析
+# parse options
 while [ -n "$1" ]; do
 	case "$1" in
 		-i) export INTERACTIVE=1;;
@@ -349,7 +349,6 @@ type platform_check_image >/dev/null 2>/dev/null || {
 	exit 1
 }
 
-# 固件镜像定位
 case "$IMAGE" in
 	http://*|\
 	https://*)
@@ -373,7 +372,6 @@ case "$IMAGE" in
 		;;
 esac
 
-# 固件校验
 json_load "$(/usr/libexec/validate_firmware_image "$IMAGE")" || {
 	echo "Failed to check image"
 	exit 1
@@ -388,7 +386,6 @@ json_get_var valid "valid"
 	fi
 }
 
-# 配置备份
 if [ -n "$CONF_IMAGE" ]; then
 	case "$(get_magic_word $CONF_IMAGE cat)" in
 		# .gz files
@@ -415,7 +412,6 @@ fi
 install_bin /sbin/upgraded
 v "Commencing upgrade. Closing all shell sessions."
 
-# 执行升级
 if [ -n "$FAILSAFE" ]; then
 	printf '%s\x00%s\x00%s' "$RAM_ROOT" "$IMAGE" "$COMMAND" >/tmp/sysupgrade
 	lock -u /tmp/.failsafe

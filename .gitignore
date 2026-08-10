@@ -40,7 +40,6 @@ target/linux/bcm27xx/image/config.txt
 package/base-files/files/etc/banner
 package/system/opkg/files/customfeeds.conf
 target/linux/bcm27xx/image/Makefile
-target/linux/generic/config-6.6
 target/linux/mediatek/filogic/base-files/etc/board.d/01_leds
 target/linux/mediatek/filogic/base-files/etc/board.d/02_network
 target/linux/mediatek/filogic/base-files/etc/board.d/03_gpio_switches
@@ -70,7 +69,6 @@ package/network/utils/nftables/Makefile
 package/system/opkg/files/customfeeds.conf
 target/linux/bcm27xx/image/Makefile
 target/linux/bcm27xx/image/cmdline.txt
-target/linux/generic/config-6.6
 target/linux/mediatek/filogic/base-files/etc/board.d/01_leds
 target/linux/mediatek/filogic/base-files/etc/board.d/02_network
 target/linux/mediatek/filogic/base-files/etc/board.d/03_gpio_switches
@@ -81,6 +79,8 @@ target/linux/x86/config-6.6
 target/linux/x86/generic/config-6.6
 target/linux/x86/geode/config-6.6
 target/linux/x86/legacy/config-6.6
+package/feeds/
+
 tools/Makefile
 tools/dwarves/Makefile
 .config.keep
