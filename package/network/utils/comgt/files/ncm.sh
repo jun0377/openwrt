@@ -249,7 +249,7 @@ proto_ncm_setup() {
 		interface="$_saved_interface"
 	}
 
-	# 模组初始化
+	# 模组初始化,源码:submodules/openmptcprouter-feeds/omr-tracker/files/usr/share/omr/lib/34663301.sh
 	atcmd_init ${ttyUSB}
 
 	# 模组未使能,直接退出并不再重新尝试拨号, uci get sim.sim1.enable
@@ -263,7 +263,7 @@ proto_ncm_setup() {
 
 	logger -t "NCM" "ifname:${ifname} before atcmd_dial"
 
-	# 拨号成功则进行DHCP
+	# 拨号,源码:submodules/openmptcprouter-feeds/omr-tracker/files/usr/share/omr/lib/34663301.sh
 	# 拨号失败时退出并启动tracker-sim进程, 监控何时可以重新拨号
 	if ! atcmd_dial ${ttyUSB}; then
 		logger -t "NCM" "ifname:${ifname} atcmd_dial failed!"
