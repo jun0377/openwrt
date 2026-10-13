@@ -167,11 +167,16 @@ proto_ncm_setup() {
     config_get sysfs "$ifname" usb
 	[ -z "$sysfs" ] && {
 		logger -t "NCM" "$ifname sysfs is not defined! (uci get sim.$ifname.usb)" 
-		# proto_set_available "$ifname" 0
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
     [ ! -d "$sysfs" ] && {
 		logger -t "NCM" "$ifname sysfs is not exist! sysfs:${sysfs}" 
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 
@@ -181,18 +186,24 @@ proto_ncm_setup() {
 	config_get ttyUSB "$ifname" ttyUSB
 	[ -z "$ttyUSB" ] && {
 		logger -t "NCM" "$ifname ttyUSB is not defined! (uci get sim.$ifname.ttyUSB)"
-		# proto_set_available "$ifname" 0
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 	[ ! -d "$sysfs/$ttyUSB" ] && {
 		logger -t "NCM" "$ifname ttyUSB sysfs path is not exist! $sysfs/$ttyUSB"
-		# proto_set_available "$ifname" 0
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 	ttyUSB=$(ls "$sysfs/$ttyUSB" | grep ttyUSB)
 	[ -z "$ttyUSB" ] && {
 		logger -t "NCM" "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
-		# proto_set_available "$ifname" 0
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 	ttyUSB="/dev/${ttyUSB}"
@@ -202,6 +213,9 @@ proto_ncm_setup() {
 	interface=$(ls "$sysfs"/*/net/ 2>/dev/null)
 	[ -z "$interface" ] && {
 		logger -t "NCM" "$ifname can not find interface in ${sysfs}"
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 
@@ -221,11 +235,17 @@ proto_ncm_setup() {
 	VID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idVendor)
     [ -z "$VID" ] && { 
 		logger -t "NCM" "ifname:${ifname} unknown Vendor! "
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 	PID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idProduct)
     [ -z "$PID" ] && {
 		logger -t "NCM" "ifname:${ifname} unknown Product! "
+		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		proto_set_available "$ifname" 0
+		proto_block_restart "$ifname"
 		return 1
 	}
 
