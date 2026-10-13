@@ -173,10 +173,11 @@ proto_ncm_setup() {
 		return 1
 	}
     [ ! -d "$sysfs" ] && {
-		logger -t "NCM" "$ifname sysfs is not exist! sysfs:${sysfs}" 
-		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
-		proto_set_available "$ifname" 0
-		proto_block_restart "$ifname"
+		logger -t "NCM" "$ifname sysfs is not exist! sysfs:${sysfs}"
+		sleep 15
+		# # 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
+		# proto_set_available "$ifname" 0
+		# proto_block_restart "$ifname"
 		return 1
 	}
 
