@@ -2,9 +2,45 @@
 
 # NCM协议处理脚本，用于OpenWrt系统中管理NCM调制解调器连接
 
+# 日志: /var/log/sim/ncm/ncm.log, 超过 1MB 时备份为 ncm.log.rotate(只保留一份), 再从空文件写
+NCM_LOG_DIR="/var/log/sim/ncm"
+NCM_LOG_FILE="${NCM_LOG_DIR}/ncm.log"
+NCM_LOG_MAX_SIZE=1048576
+NCM_LOG_BYTES=0
+
+# 初始化日志文件并读入当前大小(每次进程启动只做一次)
+ncm_log_init() {
+	mkdir -p "$NCM_LOG_DIR" 2>/dev/null
+	NCM_LOG_BYTES=0
+	[ -f "$NCM_LOG_FILE" ] && NCM_LOG_BYTES=$(wc -c < "$NCM_LOG_FILE" 2>/dev/null | tr -d ' ')
+	[ -n "$NCM_LOG_BYTES" ] || NCM_LOG_BYTES=0
+}
+
+# 写一行日志, 按进程内累计字节数判断是否需要轮转
+ncm_log_write() {
+	local line="$1"
+	local len
+
+	mkdir -p "$NCM_LOG_DIR" 2>/dev/null
+	len=$(( ${#line} + 1 ))
+	if [ $((NCM_LOG_BYTES + len)) -gt "$NCM_LOG_MAX_SIZE" ]; then
+		mv -f "$NCM_LOG_FILE" "${NCM_LOG_FILE}.rotate" 2>/dev/null
+		NCM_LOG_BYTES=0
+	fi
+	printf '%s\n' "$line" >> "$NCM_LOG_FILE" 2>/dev/null
+	NCM_LOG_BYTES=$((NCM_LOG_BYTES + len))
+}
+
+# 统一日志出口: 时间戳 + 内容
+function _log() {
+	ncm_log_write "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+ncm_log_init
+
 [ -n "$INCLUDE_ONLY" ] || {
 	
-	logger -t "NCM" "Init..."
+	_log "Init..."
 
 	# 加载OpenWrt通用函数库
 	. /lib/functions.sh
@@ -12,14 +48,14 @@
 	. ../netifd-proto.sh
 
 	# 初始化协议处理器
-	logger -t "NCM" "$@"
+	_log "$@"
 	init_proto "$@"
 }
 
 # NCM协议配置初始化函数
 proto_ncm_init_config() {
 	
-	logger -t "NCM" "$FUNCNAME Enter proto_ncm_init_config"
+	_log "$FUNCNAME Enter proto_ncm_init_config"
 
 	# 标记此协议不需要物理设备
 	no_device=1
@@ -54,7 +90,7 @@ proto_ncm_init_config() {
 	# 添加默认配置项
 	proto_config_add_defaults
 
-	logger -t "NCM" "<${ifname}:${device}> $FUNCNAME Exit proto_ncm_init_config"
+	_log "<${ifname}:${device}> $FUNCNAME Exit proto_ncm_init_config"
 }
 
 ncm_mask2prefix() {
@@ -102,7 +138,7 @@ function sim_procd_stop()
 	local SERVICE_MATCH_EXEC=
 
 	if service_check /bin/tracker-sim "$ifname"; then
-		logger -t "NCM" "stop ${service_name}"
+		_log "stop ${service_name}"
 		service_stop /bin/tracker-sim "$ifname"
 		rm -f "$pid_file"
 	fi
@@ -127,22 +163,22 @@ function sim_procd_start()
 	local SERVICE_MATCH_EXEC=
 
 	if service_check /bin/tracker-sim "$ifname"; then
-		logger -t "NCM" "${service_name} already running"
+		_log "${service_name} already running"
 		return 0
 	fi
 
-	logger -t "NCM" "start ${service_name}"
+	_log "start ${service_name}"
 	service_start /bin/tracker-sim "$ifname"
 }
 
 # NCM协议连接建立函数
 proto_ncm_setup() {
 
-	logger -t "NCM" "Enter proto_ncm_setup"
+	_log "Enter proto_ncm_setup"
 
 	# 获取接口名称参数
 	local ifname="$1"
-	logger -t "NCM" "ifname:${ifname}"
+	_log "ifname:${ifname}"
 
 	# 停止tracker-sim进程, 避免AT指令串口竞争
 	[ ! -z "${ifname}" ] && sim_procd_stop $ifname
@@ -157,23 +193,23 @@ proto_ncm_setup() {
 	local context_type
 
 	[ "$metric" = "" ] && metric="0"
-	# logger -t "NCM" "metric:${metric}"
+	# _log "metric:${metric}"
 
 	[ -n "$profile" ] || profile=1
-	# logger -t "NCM" "profile:${profile}"
+	# _log "profile:${profile}"
 
 	# 检查sysfs中是否已有模组对应信息
 	config_load sim
     config_get sysfs "$ifname" usb
 	[ -z "$sysfs" ] && {
-		logger -t "NCM" "$ifname sysfs is not defined! (uci get sim.$ifname.usb)" 
+		_log "$ifname sysfs is not defined! (uci get sim.$ifname.usb)" 
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
 		return 1
 	}
     [ ! -d "$sysfs" ] && {
-		logger -t "NCM" "$ifname sysfs is not exist! sysfs:${sysfs}"
+		_log "$ifname sysfs is not exist! sysfs:${sysfs}"
 		sleep 15
 		# # 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		# proto_set_available "$ifname" 0
@@ -181,19 +217,19 @@ proto_ncm_setup() {
 		return 1
 	}
 
-	logger -t "NCM" "$ifname sysfs:${sysfs}"
+	_log "$ifname sysfs:${sysfs}"
 
 	# 获取ttyUSB名称
 	config_get ttyUSB "$ifname" ttyUSB
 	[ -z "$ttyUSB" ] && {
-		logger -t "NCM" "$ifname ttyUSB is not defined! (uci get sim.$ifname.ttyUSB)"
+		_log "$ifname ttyUSB is not defined! (uci get sim.$ifname.ttyUSB)"
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
 		return 1
 	}
 	[ ! -d "$sysfs/$ttyUSB" ] && {
-		logger -t "NCM" "$ifname ttyUSB sysfs path is not exist! $sysfs/$ttyUSB"
+		_log "$ifname ttyUSB sysfs path is not exist! $sysfs/$ttyUSB"
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
@@ -201,41 +237,41 @@ proto_ncm_setup() {
 	}
 	ttyUSB=$(ls "$sysfs/$ttyUSB" | grep ttyUSB)
 	[ -z "$ttyUSB" ] && {
-		logger -t "NCM" "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
+		_log "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
 		return 1
 	}
 	ttyUSB="/dev/${ttyUSB}"
-	logger -t "NCM" "$ifname $ttyUSB"
+	_log "$ifname $ttyUSB"
 
 	# 接口真实名称,如: eth1 eth2
 	interface=$(ls "$sysfs"/*/net/ 2>/dev/null)
 	[ -z "$interface" ] && {
-		logger -t "NCM" "$ifname can not find interface in ${sysfs}"
+		_log "$ifname can not find interface in ${sysfs}"
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
 		return 1
 	}
 
-	logger -t "NCM" "$ifname $ttyUSB $interface"
+	_log "$ifname $ttyUSB $interface"
 
 	# 检查是否成功获取接口名称
 	[ -n "$interface" ] || {
-		logger -t "NCM" "The interface could not be found."
+		_log "The interface could not be found."
 		# proto_notify_error "$ifname" NO_IFACE
 		# proto_set_available "$ifname" 0		
 		return 1
 	}
 
-	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device}"
+	_log "ifname:${ifname} interface:${interface} device:${device}"
 
 	# 获取模组的VID:PID
 	VID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idVendor)
     [ -z "$VID" ] && { 
-		logger -t "NCM" "ifname:${ifname} unknown Vendor! "
+		_log "ifname:${ifname} unknown Vendor! "
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
@@ -243,24 +279,24 @@ proto_ncm_setup() {
 	}
 	PID=$(cat /sys/bus/usb/devices/$(basename $sysfs)/idProduct)
     [ -z "$PID" ] && {
-		logger -t "NCM" "ifname:${ifname} unknown Product! "
+		_log "ifname:${ifname} unknown Product! "
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
 		proto_set_available "$ifname" 0
 		proto_block_restart "$ifname"
 		return 1
 	}
 
-	logger -t "NCM" "ifname:${ifname} VID:PID=$VID:$PID"
+	_log "ifname:${ifname} VID:PID=$VID:$PID"
 
 	# 根据VID:PID加载对应的AT指令脚本
 	[ ! -z ${VID} ] && [ ! -z ${PID} ] && {
 		ATCMD_FILE=/usr/share/omr/lib/${VID}${PID}.sh
 		[ ! -f ${ATCMD_FILE} ] && {
-			logger -t "NCM" "ifname:${ifname} ${ATCMD_FILE} is not exist!"
+			_log "ifname:${ifname} ${ATCMD_FILE} is not exist!"
 			return 1
 		}
 
-		logger -t "NCM" "ifname:${ifname} ${ATCMD_FILE}"
+		_log "ifname:${ifname} ${ATCMD_FILE}"
 
 		# 保存变量, 避免source ATCMD脚本时被顶层的赋值语句清空
 		local _saved_ttyUSB="$ttyUSB"
@@ -276,24 +312,24 @@ proto_ncm_setup() {
 	# 模组未使能,直接退出并不再重新尝试拨号, uci get sim.sim1.enable
 	local enable=$(uci -q get sim.$ifname.enable)
 	[ -n "$enable" ] && [ "$enable" != "1" ] && [ "$enable" != "true" ] && {
-		logger -t "NCM" "ifname:${ifname} sim is disabled by user, exit"
+		_log "ifname:${ifname} sim is disabled by user, exit"
 		sim_procd_start "${ifname}"
 		proto_block_restart "$ifname"
 		return 1
 	}
 
-	logger -t "NCM" "ifname:${ifname} before atcmd_dial"
+	_log "ifname:${ifname} before atcmd_dial"
 
 	# 拨号,源码:submodules/openmptcprouter-feeds/omr-tracker/files/usr/share/omr/lib/34663301.sh
 	# 拨号失败时退出并启动tracker-sim进程, 监控何时可以重新拨号
 	if ! atcmd_dial ${ttyUSB}; then
-		logger -t "NCM" "ifname:${ifname} atcmd_dial failed!"
+		_log "ifname:${ifname} atcmd_dial failed!"
 		sim_procd_start ${ifname}
 		sleep 20
 		return 1
 	fi
 
-	logger -t "NCM" "ifname:${ifname} after atcmd_dial"
+	_log "ifname:${ifname} after atcmd_dial"
 
 	# 启动tracker-sim, 进行状态监控
 	sim_procd_start ${ifname}
@@ -302,28 +338,28 @@ proto_ncm_setup() {
 	ifconfig ${interface} up
 	res="$(udhcpc -i "$interface" -t 5 -T 3 -n -q 2>&1)"
 	printf '%s\n' "$res" | while IFS= read -r line; do
-		[ -n "$line" ] && logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} $line"
+		[ -n "$line" ] && _log "ifname:${ifname} interface:${interface} device:${device} $line"
 	done
 
 	ip="$(echo "$res" | awk '/lease of/ {print $4; exit}')"
 	mask="$(echo "$res" | awk '/ip addr add/ {split($5,a,"/"); print a[2]; exit}')"
 	gw="$(echo "$res" | sed -n 's/.*setting default routers:[[:space:]]*//p' | awk '{print $1; exit}')"
-	logger -t "NCM" "ifname:${ifname} interface:${interface} ip:${ip} mask:${mask} gw:${gw}"
+	_log "ifname:${ifname} interface:${interface} ip:${ip} mask:${mask} gw:${gw}"
 	[ -n "$ip" ] || {
-		logger -t "NCM" "ifname:${ifname} interface:${interface} DHCP did not return IPv4 address"
+		_log "ifname:${ifname} interface:${interface} DHCP did not return IPv4 address"
 		proto_notify_error "$ifname" NO_CARRIER
 		return 1
 	}
 	prefix="$(ncm_mask2prefix "$mask" 2>/dev/null)"
 	[ -n "$prefix" ] || {
-		logger -t "NCM" "ifname:${ifname} interface:${interface} invalid netmask:${mask}"
+		_log "ifname:${ifname} interface:${interface} invalid netmask:${mask}"
 		proto_notify_error "$ifname" NO_CARRIER
 		return 1
 	}
 	
 	# 设置网络接口
 	echo "Setting up $ifname"
-	logger -t "NCM" "ifname:${ifname} interface:${interface} Setting up $ifname"
+	_log "ifname:${ifname} interface:${interface} Setting up $ifname"
 	# 初始化接口更新（启用）
 	proto_init_update "$interface" 1
 	proto_add_ipv4_address "$ip" "$prefix"
@@ -337,14 +373,14 @@ proto_ncm_setup() {
 	# 发送接口更新
 	proto_send_update "$ifname"
 
-	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Exit proto_ncm_setup"
+	_log "ifname:${ifname} interface:${interface} device:${device} Exit proto_ncm_setup"
 }
 
 # NCM协议连接断开函数
 proto_ncm_teardown() {
 
 	local ifname="$1"
-	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Enter teardown"
+	_log "ifname:${ifname} interface:${interface} device:${device} Enter teardown"
 	
 	sleep 1
 
@@ -354,11 +390,11 @@ proto_ncm_teardown() {
 	# 发送接口更新
 	proto_send_update "$ifname"
 
-	logger -t "NCM" "ifname:${ifname} interface:${interface} device:${device} Exit teardown"
+	_log "ifname:${ifname} interface:${interface} device:${device} Exit teardown"
 }
 
 # 如果不是仅包含模式则注册NCM协议
 [ -n "$INCLUDE_ONLY" ] || {
-	logger -t "NCM" "add protocol ncm"
+	_log "add protocol ncm"
 	add_protocol ncm
 }
