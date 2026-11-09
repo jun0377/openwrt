@@ -313,6 +313,7 @@ proto_ncm_setup() {
 	local enable=$(uci -q get sim.$ifname.enable)
 	[ -n "$enable" ] && [ "$enable" != "1" ] && [ "$enable" != "true" ] && {
 		_log "ifname:${ifname} sim is disabled by user, exit"
+		rm -f "/tmp/tracker-sim/sim/${ifname}/dial_fail"
 		sim_procd_start "${ifname}"
 		proto_block_restart "$ifname"
 		return 1
@@ -324,10 +325,31 @@ proto_ncm_setup() {
 	# 拨号失败时退出并启动tracker-sim进程, 监控何时可以重新拨号
 	if ! atcmd_dial ${ttyUSB}; then
 		_log "ifname:${ifname} atcmd_dial failed!"
+
+		# 连续3次拨号失败后复位模组, 让模组重新识别SIM卡
+		local fail_dir="/tmp/tracker-sim/sim/${ifname}"
+		local fail_file="${fail_dir}/dial_fail"
+		mkdir -p "${fail_dir}"
+		local fail_count=$(cat "$fail_file" 2>/dev/null)
+		case "$fail_count" in
+			''|*[!0-9]*) fail_count=0 ;;
+		esac
+		fail_count=$((fail_count + 1))
+		echo "$fail_count" > "$fail_file"
+		_log "ifname:${ifname} dial failed ${fail_count} times"
+
+		if [ "$fail_count" -ge 3 ]; then
+			_log "ifname:${ifname} dial failed ${fail_count} times, reset now!"
+			atcmd_reset "${ttyUSB}"
+			sleep 20
+			echo 0 > "$fail_file"
+		fi
+
 		sim_procd_start ${ifname}
-		sleep 20
+		sleep 15
 		return 1
 	fi
+	rm -f "/tmp/tracker-sim/sim/${ifname}/dial_fail"
 
 	_log "ifname:${ifname} after atcmd_dial"
 
