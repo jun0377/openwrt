@@ -239,8 +239,9 @@ proto_ncm_setup() {
 	[ -z "$ttyUSB" ] && {
 		_log "$ifname can not find ttyUSB in $sysfs/$ttyUSB"
 		# 设备不在位: 标记不可用并阻止 netifd 重启, 不再重试
-		proto_set_available "$ifname" 0
-		proto_block_restart "$ifname"
+		# proto_set_available "$ifname" 0
+		# proto_block_restart "$ifname"
+		sleep 20
 		return 1
 	}
 	ttyUSB="/dev/${ttyUSB}"
